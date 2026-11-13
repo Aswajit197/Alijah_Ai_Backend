@@ -1,0 +1,191 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// =========================================================================
+// 1. Platform Super Admin (Manages tenants, plans, global settings)
+// =========================================================================
+model SuperAdmin {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("super_admins")
+}
+
+// =========================================================================
+// 2. Tenant / Company Entity
+// =========================================================================
+model Tenant {
+  id           String        @id @default(cuid())
+  name         String        // e.g. "Desert Air HVAC & Plumbing"
+  slug         String        @unique // e.g. "desert-air" (used for subdomain / company code)
+  tradeType    String        @default("HVAC") // HVAC, PLUMBING, ELECTRICAL, ROOFING, etc.
+  phone        String?
+  address      String?
+  status       TenantStatus  @default(ACTIVE)
+  plan         TenantPlan    @default(GROWTH)
+  
+  // Relations
+  users        User[]
+  roles        Role[]
+  customers    Customer[]
+  jobs         Job[]
+  
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([slug])
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  ARCHIVED
+}
+
+enum TenantPlan {
+  STARTER
+  GROWTH
+  OPERATIONS
+  ENTERPRISE
+}
+
+// =========================================================================
+// 3. Dynamic Roles & Permissions System
+// =========================================================================
+model Permission {
+  id          String           @id // Unique permission key e.g. "customers:read"
+  name        String           // Human readable label e.g. "View Customers"
+  category    String           // Grouping e.g. "Customers", "Dispatch", "Billing"
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id             String           @id @default(cuid())
+  tenantId       String
+  name           String           // e.g. "Business Owner", "Office Manager", "Senior Dispatcher"
+  slug           String           // e.g. "owner", "office-manager", "dispatcher"
+  description    String?
+  isDefault      Boolean          @default(false) // Protected default roles (e.g. Owner/Admin) cannot be deleted
+  approvalLimit  Decimal          @default(0) @db.Decimal(10, 2) // Financial limit ($0 to unlimited)
+  
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions    RolePermission[]
+  users          User[]
+
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// =========================================================================
+// 4. Tenant Users
+// =========================================================================
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String
+  email        String
+  passwordHash String
+  name         String
+  phone        String?
+  roleId       String
+  isActive     Boolean   @default(true)
+  
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role         Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([roleId])
+  @@map("users")
+}
+
+// =========================================================================
+// 5. Tenant Core Data Models (Examples of Tenant-Scoped Resources)
+// =========================================================================
+model Customer {
+  id           String    @id @default(cuid())
+  tenantId     String
+  name         String
+  phone        String
+  email        String?
+  address      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  jobs         Job[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@map("customers")
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  tenantId       String
+  customerId     String
+  title          String
+  status         JobStatus @default(LEAD)
+  priority       String    @default("NORMAL")
+  scheduledStart DateTime?
+  scheduledEnd   DateTime?
+  totalAmount    Decimal?  @db.Decimal(10, 2)
+  notes          String?
+  
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("jobs")
+}
+
+enum JobStatus {
+  LEAD
+  QUALIFIED
+  SCHEDULED
+  DISPATCHED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
