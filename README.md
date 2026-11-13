@@ -81,3 +81,4 @@ Opens at `http://localhost:5555`.
 | **Sales** | `sales@pashupat.cloud` | `password123` | Sales Manager ($15,000 limit) |
 | **Technician** | `technician@pashupat.cloud` | `password123` | Field Technician (`tech_app`) |
 | **Finance** | `finance@pashupat.cloud` | `password123` | Finance / AR ($5,000 limit) |
+

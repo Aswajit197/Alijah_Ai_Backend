@@ -82,7 +82,7 @@ model Role {
   slug           String           // e.g. "owner", "office-manager", "dispatcher"
   description    String?
   isDefault      Boolean          @default(false) // Protected default roles (e.g. Owner/Admin) cannot be deleted
-  approvalLimit  Decimal          @default(0) @db.Decimal(10, 2) // Financial limit ($0 to unlimited)
+  approvalLimit  Decimal          @default(0) @db.Decimal(14, 2) // Financial limit ($0 to unlimited)
   
   tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   permissions    RolePermission[]
