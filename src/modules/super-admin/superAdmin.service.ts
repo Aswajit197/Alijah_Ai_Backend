@@ -1,7 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { hashPassword, verifyPassword } from '../../utils/password.js';
 import { signSuperAdminToken } from '../../utils/jwt.js';
-import { SYSTEM_PERMISSIONS } from '../../constants/permissions.js';
 
 export class SuperAdminService {
   static async login(email: string, password: string) {
@@ -68,7 +67,6 @@ export class SuperAdminService {
       throw new Error(`A tenant with code '${slug}' already exists.`);
     }
 
-    // Find the global Owner role
     const ownerRole = await prisma.role.findUnique({
       where: { slug: 'owner' },
     });
@@ -80,7 +78,6 @@ export class SuperAdminService {
     const passwordHash = await hashPassword(initialPassword);
 
     return prisma.$transaction(async (tx) => {
-      // 1. Create Tenant
       const tenant = await tx.tenant.create({
         data: {
           name: data.name,
@@ -93,7 +90,6 @@ export class SuperAdminService {
         },
       });
 
-      // 2. Create Tenant Owner User mapped to the global Owner role
       const ownerUser = await tx.user.create({
         data: {
           tenantId: tenant.id,
@@ -142,10 +138,6 @@ export class SuperAdminService {
       },
       orderBy: { createdAt: 'asc' },
     });
-  }
-
-  static getAvailablePermissions() {
-    return SYSTEM_PERMISSIONS;
   }
 
   static async createRole(data: {
@@ -248,5 +240,81 @@ export class SuperAdminService {
 
     await prisma.role.delete({ where: { id } });
     return { id, deleted: true };
+  }
+
+  // --- Dynamic Permissions Management (SuperAdmin Only) ---
+  static async listPermissions() {
+    return prisma.permission.findMany({
+      include: {
+        _count: {
+          select: { roles: true },
+        },
+      },
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+    });
+  }
+
+  static async createPermission(data: {
+    id: string;
+    name: string;
+    category: string;
+    description?: string;
+  }) {
+    const id = data.id.toLowerCase().trim().replace(/[^a-z0-9_:]/g, '_');
+
+    const existing = await prisma.permission.findUnique({ where: { id } });
+    if (existing) {
+      throw new Error(`Permission with ID '${id}' already exists.`);
+    }
+
+    return prisma.permission.create({
+      data: {
+        id,
+        name: data.name,
+        category: data.category || 'General',
+        description: data.description,
+      },
+    });
+  }
+
+  static async updatePermission(id: string, data: {
+    name?: string;
+    category?: string;
+    description?: string;
+  }) {
+    const perm = await prisma.permission.findUnique({ where: { id } });
+    if (!perm) {
+      throw new Error('Permission not found');
+    }
+
+    return prisma.permission.update({
+      where: { id },
+      data: {
+        name: data.name !== undefined ? data.name : perm.name,
+        category: data.category !== undefined ? data.category : perm.category,
+        description: data.description !== undefined ? data.description : perm.description,
+      },
+    });
+  }
+
+  static async deletePermission(id: string) {
+    const perm = await prisma.permission.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { roles: true },
+        },
+      },
+    });
+
+    if (!perm) {
+      throw new Error('Permission not found');
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await tx.rolePermission.deleteMany({ where: { permissionId: id } });
+      await tx.permission.delete({ where: { id } });
+      return { id, deleted: true, detachedFromRoles: perm._count.roles };
+    });
   }
 }

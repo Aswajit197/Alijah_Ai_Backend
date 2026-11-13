@@ -17,6 +17,10 @@ router.patch('/tenants/:id/status', SuperAdminController.updateStatus);
 
 // Role & Permission Management (SuperAdmin Only)
 router.get('/permissions', SuperAdminController.getPermissions);
+router.post('/permissions', SuperAdminController.createPermission);
+router.put('/permissions/:id', SuperAdminController.updatePermission);
+router.delete('/permissions/:id', SuperAdminController.deletePermission);
+
 router.get('/roles', SuperAdminController.listRoles);
 router.post('/roles', SuperAdminController.createRole);
 router.put('/roles/:id', SuperAdminController.updateRole);

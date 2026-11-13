@@ -87,9 +87,56 @@ export class SuperAdminController {
     }
   }
 
-  static getPermissions(_req: Request, res: Response) {
-    const permissions = SuperAdminService.getAvailablePermissions();
-    return successResponse(res, permissions);
+  // --- Permissions Management ---
+  static async getPermissions(_req: Request, res: Response) {
+    try {
+      const permissions = await SuperAdminService.listPermissions();
+      return successResponse(res, permissions);
+    } catch (err: any) {
+      return errorResponse(res, err.message, 500);
+    }
+  }
+
+  static async createPermission(req: Request, res: Response) {
+    try {
+      const schema = z.object({
+        id: z.string().min(2),
+        name: z.string().min(2),
+        category: z.string().min(2),
+        description: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+      const perm = await SuperAdminService.createPermission(data);
+      return successResponse(res, perm, 'Permission created successfully', 201);
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
+
+  static async updatePermission(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const schema = z.object({
+        name: z.string().min(2).optional(),
+        category: z.string().min(2).optional(),
+        description: z.string().optional(),
+      });
+      const data = schema.parse(req.body);
+      const updated = await SuperAdminService.updatePermission(id, data);
+      return successResponse(res, updated, 'Permission updated successfully');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
+
+  static async deletePermission(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const result = await SuperAdminService.deletePermission(id);
+      return successResponse(res, result, 'Permission deleted successfully');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
   }
 
   static async createRole(req: Request, res: Response) {
