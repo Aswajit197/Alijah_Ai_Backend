@@ -34,12 +34,12 @@ export class UserService {
   }) {
     const email = data.email.toLowerCase().trim();
 
-    // Verify role belongs to this tenant
-    const role = await prisma.role.findFirst({
-      where: { id: data.roleId, tenantId },
+    // Verify role exists in the platform
+    const role = await prisma.role.findUnique({
+      where: { id: data.roleId },
     });
     if (!role) {
-      throw new Error('Selected role does not exist in your organization.');
+      throw new Error('Selected role does not exist.');
     }
 
     // Check email uniqueness within this tenant
@@ -86,15 +86,15 @@ export class UserService {
   }
 
   static async reassignRole(tenantId: string, userId: string, newRoleId: string) {
-    // Verify target role exists in tenant
-    const role = await prisma.role.findFirst({
-      where: { id: newRoleId, tenantId },
+    // Verify target role exists
+    const role = await prisma.role.findUnique({
+      where: { id: newRoleId },
     });
     if (!role) {
       throw new Error('Target role not found');
     }
 
-    // Verify target user exists in tenant
+    // Verify target user exists in this tenant
     const user = await prisma.user.findFirst({
       where: { id: userId, tenantId },
     });
@@ -145,4 +145,3 @@ export class UserService {
     });
   }
 }
-

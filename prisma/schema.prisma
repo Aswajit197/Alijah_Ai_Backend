@@ -37,7 +37,6 @@ model Tenant {
   
   // Relations
   users        User[]
-  roles        Role[]
   customers    Customer[]
   jobs         Job[]
   
@@ -77,22 +76,17 @@ model Permission {
 
 model Role {
   id             String           @id @default(cuid())
-  tenantId       String
-  name           String           // e.g. "Business Owner", "Office Manager", "Senior Dispatcher"
-  slug           String           // e.g. "owner", "office-manager", "dispatcher"
+  name           String           // e.g. "Business Owner", "Office Manager", "Dispatcher"
+  slug           String           @unique // e.g. "owner", "office_manager", "dispatcher"
   description    String?
-  isDefault      Boolean          @default(false) // Protected default roles (e.g. Owner/Admin) cannot be deleted
-  approvalLimit  Decimal          @default(0) @db.Decimal(14, 2) // Financial limit ($0 to unlimited)
+  approvalLimit  Decimal          @default(0) @db.Decimal(14, 2) // Default financial limit ($0 to unlimited)
   
-  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   permissions    RolePermission[]
   users          User[]
 
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  @@unique([tenantId, slug])
-  @@index([tenantId])
   @@map("roles")
 }
 

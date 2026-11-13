@@ -9,9 +9,17 @@ router.post('/auth/login', SuperAdminController.login);
 
 // Protected SuperAdmin routes
 router.use(authenticate, requireSuperAdmin);
+
+// Tenant management
 router.get('/tenants', SuperAdminController.listTenants);
 router.post('/tenants', SuperAdminController.createTenant);
 router.patch('/tenants/:id/status', SuperAdminController.updateStatus);
 
-export const superAdminRoutes = router;
+// Role & Permission Management (SuperAdmin Only)
+router.get('/permissions', SuperAdminController.getPermissions);
+router.get('/roles', SuperAdminController.listRoles);
+router.post('/roles', SuperAdminController.createRole);
+router.put('/roles/:id', SuperAdminController.updateRole);
+router.delete('/roles/:id', SuperAdminController.deleteRole);
 
+export const superAdminRoutes = router;

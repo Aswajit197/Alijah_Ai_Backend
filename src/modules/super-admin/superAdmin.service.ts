@@ -34,6 +34,7 @@ export class SuperAdminService {
     };
   }
 
+  // --- Tenant Management ---
   static async listTenants() {
     return prisma.tenant.findMany({
       include: {
@@ -62,17 +63,22 @@ export class SuperAdminService {
   }) {
     const slug = data.slug.toLowerCase().trim();
 
-    // Check if slug already exists
     const existing = await prisma.tenant.findUnique({ where: { slug } });
     if (existing) {
       throw new Error(`A tenant with code '${slug}' already exists.`);
     }
 
+    // Find the global Owner role
+    const ownerRole = await prisma.role.findUnique({
+      where: { slug: 'owner' },
+    });
+    if (!ownerRole) {
+      throw new Error("System error: Global 'owner' role not found. Please run seed script.");
+    }
+
     const initialPassword = data.ownerPassword || 'DesertAir2026!';
     const passwordHash = await hashPassword(initialPassword);
-    const allPermIds = SYSTEM_PERMISSIONS.map((p) => p.id);
 
-    // Transaction to create tenant, seed default roles, and create owner user
     return prisma.$transaction(async (tx) => {
       // 1. Create Tenant
       const tenant = await tx.tenant.create({
@@ -87,40 +93,7 @@ export class SuperAdminService {
         },
       });
 
-      // 2. Seed Default Protected Roles (Owner & Admin)
-      const ownerRole = await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Business Owner',
-          slug: 'owner',
-          isDefault: true,
-          approvalLimit: 999999999,
-          description: 'Full unrestricted oversight, financial authority, and executive settings.',
-        },
-      });
-
-      const adminRole = await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          name: 'Administrator',
-          slug: 'admin',
-          isDefault: true,
-          approvalLimit: 999999999,
-          description: 'Multi-location and operational administration, user and role management.',
-        },
-      });
-
-      // Attach all permissions to Owner and Admin
-      for (const permId of allPermIds) {
-        await tx.rolePermission.create({
-          data: { roleId: ownerRole.id, permissionId: permId },
-        });
-        await tx.rolePermission.create({
-          data: { roleId: adminRole.id, permissionId: permId },
-        });
-      }
-
-      // 3. Create Tenant Owner User
+      // 2. Create Tenant Owner User mapped to the global Owner role
       const ownerUser = await tx.user.create({
         data: {
           tenantId: tenant.id,
@@ -153,5 +126,127 @@ export class SuperAdminService {
       data: { status },
     });
   }
-}
 
+  // --- Dynamic Roles Management (SuperAdmin Only) ---
+  static async listRoles() {
+    return prisma.role.findMany({
+      include: {
+        permissions: {
+          include: {
+            permission: true,
+          },
+        },
+        _count: {
+          select: { users: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  static getAvailablePermissions() {
+    return SYSTEM_PERMISSIONS;
+  }
+
+  static async createRole(data: {
+    name: string;
+    slug: string;
+    description?: string;
+    approvalLimit?: number;
+    permissions: string[];
+  }) {
+    const slug = data.slug.toLowerCase().trim();
+
+    const existing = await prisma.role.findUnique({ where: { slug } });
+    if (existing) {
+      throw new Error(`A role with slug '${slug}' already exists.`);
+    }
+
+    return prisma.$transaction(async (tx) => {
+      const role = await tx.role.create({
+        data: {
+          name: data.name,
+          slug,
+          description: data.description,
+          approvalLimit: data.approvalLimit || 0,
+        },
+      });
+
+      if (data.permissions && data.permissions.length > 0) {
+        for (const permId of data.permissions) {
+          await tx.rolePermission.create({
+            data: { roleId: role.id, permissionId: permId },
+          });
+        }
+      }
+
+      return tx.role.findUnique({
+        where: { id: role.id },
+        include: { permissions: { include: { permission: true } } },
+      });
+    });
+  }
+
+  static async updateRole(id: string, data: {
+    name?: string;
+    description?: string;
+    approvalLimit?: number;
+    permissions?: string[];
+  }) {
+    const role = await prisma.role.findUnique({ where: { id } });
+    if (!role) {
+      throw new Error('Role not found');
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await tx.role.update({
+        where: { id },
+        data: {
+          name: data.name !== undefined ? data.name : role.name,
+          description: data.description !== undefined ? data.description : role.description,
+          approvalLimit: data.approvalLimit !== undefined ? data.approvalLimit : role.approvalLimit,
+        },
+      });
+
+      if (data.permissions !== undefined) {
+        await tx.rolePermission.deleteMany({ where: { roleId: id } });
+        for (const permId of data.permissions) {
+          await tx.rolePermission.create({
+            data: { roleId: id, permissionId: permId },
+          });
+        }
+      }
+
+      return tx.role.findUnique({
+        where: { id },
+        include: { permissions: { include: { permission: true } } },
+      });
+    });
+  }
+
+  static async deleteRole(id: string) {
+    const role = await prisma.role.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { users: true },
+        },
+      },
+    });
+
+    if (!role) {
+      throw new Error('Role not found');
+    }
+
+    if (role.slug === 'owner') {
+      throw new Error("The 'owner' role is foundational and cannot be deleted.");
+    }
+
+    if (role._count.users > 0) {
+      throw new Error(`Cannot delete role: ${role._count.users} user(s) across companies are currently assigned to this role.`);
+    }
+
+    await prisma.role.delete({ where: { id } });
+    return { id, deleted: true };
+  }
+}

@@ -41,7 +41,116 @@ async function main() {
   });
   console.log(`✅ Seeded SuperAdmin: ${superAdmin.email}`);
 
-  // 3. Seed Demo Tenant: Desert Air HVAC & Plumbing
+  // 3. Seed the 6 Standard Roles (Managed by SuperAdmin)
+  const allPermIds = SYSTEM_PERMISSIONS.map((p) => p.id);
+
+  async function seedRole(
+    name: string,
+    slug: string,
+    description: string,
+    approvalLimit: number,
+    permissions: string[]
+  ) {
+    const role = await prisma.role.upsert({
+      where: { slug },
+      update: {
+        name,
+        description,
+        approvalLimit,
+      },
+      create: {
+        name,
+        slug,
+        description,
+        approvalLimit,
+      },
+    });
+
+    await prisma.rolePermission.deleteMany({
+      where: { roleId: role.id },
+    });
+
+    for (const permId of permissions) {
+      await prisma.rolePermission.create({
+        data: {
+          roleId: role.id,
+          permissionId: permId,
+        },
+      });
+    }
+
+    return role;
+  }
+
+  const ownerRole = await seedRole(
+    'Business Owner',
+    'owner',
+    'Executive overview, major approvals, contract signing, and full visibility.',
+    99999999.99,
+    allPermIds
+  );
+
+  const officeRole = await seedRole(
+    'Office Manager',
+    'office_manager',
+    'Urgent inbox, exception triage, customer callbacks, and day-to-day operations.',
+    1000,
+    [
+      'view_home', 'view_inbox', 'inbox_reply', 'inbox_takeover', 'view_recordings',
+      'view_customers', 'edit_customers', 'view_leads', 'book_jobs', 'dispatch_jobs',
+      'view_estimates', 'approve_actions', 'view_exceptions', 'view_invoices',
+      'view_workflows', 'run_lab', 'view_knowledge', 'manage_knowledge',
+      'view_supervisor', 'view_projects', 'view_settings'
+    ]
+  );
+
+  const dispatcherRole = await seedRole(
+    'Dispatcher',
+    'dispatcher',
+    'Scheduling, calendar swimlanes, technician routing, and after-hours call booking.',
+    0,
+    [
+      'view_home', 'view_inbox', 'inbox_reply', 'inbox_takeover', 'view_recordings',
+      'view_customers', 'view_leads', 'book_jobs', 'dispatch_jobs', 'view_exceptions',
+      'view_projects'
+    ]
+  );
+
+  const salesRole = await seedRole(
+    'Sales / Estimator',
+    'sales_estimator',
+    'Sales pipeline, estimates, tiered proposals, and automated follow-up cadences.',
+    15000,
+    [
+      'view_home', 'view_inbox', 'inbox_reply', 'inbox_takeover', 'view_recordings',
+      'view_customers', 'view_leads', 'book_jobs', 'view_estimates', 'edit_estimates',
+      'approve_actions', 'view_exceptions', 'view_financial', 'view_workflows',
+      'manage_workflows', 'view_results', 'view_knowledge', 'view_projects'
+    ]
+  );
+
+  const techRole = await seedRole(
+    'Field Technician',
+    'technician',
+    'Mobile job app, on-site checklist, equipment notes, and completion.',
+    0,
+    ['tech_app']
+  );
+
+  const financeRole = await seedRole(
+    'Finance / AR',
+    'finance',
+    'AR aging buckets, invoice ledger, payment links, and collections.',
+    5000,
+    [
+      'view_home', 'view_customers', 'view_financial', 'view_invoices', 'manage_ar',
+      'pay_actions', 'approve_actions', 'view_exceptions', 'view_results', 'view_audit'
+    ]
+  );
+
+  console.log('✅ Seeded 6 standard roles (editable/deletable by SuperAdmin).');
+
+  // 4. Seed Demo Tenant: Desert Air HVAC & Plumbing
   const demoSlug = 'desert-air';
   const tenant = await prisma.tenant.upsert({
     where: { slug: demoSlug },
@@ -65,93 +174,10 @@ async function main() {
   });
   console.log(`✅ Seeded Demo Tenant: ${tenant.name} (${tenant.slug})`);
 
-  // Helper to create role with permissions
-  const allPermIds = SYSTEM_PERMISSIONS.map((p) => p.id);
+  // 5. Seed Demo Users mapped to the 6 roles
   const hash = await bcrypt.hash('password123', 10);
-
-  async function createOrUpdateRole(
-    name: string,
-    slug: string,
-    isDefault: boolean,
-    approvalLimit: number,
-    permissions: string[]
-  ) {
-    const role = await prisma.role.upsert({
-      where: {
-        tenantId_slug: { tenantId: tenant.id, slug },
-      },
-      update: {
-        name,
-        isDefault,
-        approvalLimit,
-      },
-      create: {
-        tenantId: tenant.id,
-        name,
-        slug,
-        isDefault,
-        approvalLimit,
-      },
-    });
-
-    // Delete existing role permissions and re-insert
-    await prisma.rolePermission.deleteMany({
-      where: { roleId: role.id },
-    });
-
-    for (const permId of permissions) {
-      await prisma.rolePermission.create({
-        data: {
-          roleId: role.id,
-          permissionId: permId,
-        },
-      });
-    }
-
-    return role;
-  }
-
-  // A. Default Protected Roles
-  const ownerRole = await createOrUpdateRole('Business Owner', 'owner', true, 999999999, allPermIds);
-  const adminRole = await createOrUpdateRole('Administrator', 'admin', true, 999999999, allPermIds);
-
-  // B. Dynamic Prototype Roles
-  const officeRole = await createOrUpdateRole('Office Manager', 'office-manager', false, 1000, [
-    'view_home', 'view_inbox', 'inbox_reply', 'inbox_takeover', 'view_recordings',
-    'view_customers', 'edit_customers', 'view_leads', 'book_jobs', 'dispatch_jobs',
-    'view_estimates', 'approve_actions', 'view_exceptions', 'view_invoices',
-    'view_workflows', 'run_lab', 'view_knowledge', 'manage_knowledge',
-    'view_supervisor', 'view_projects', 'view_settings'
-  ]);
-
-  const dispatcherRole = await createOrUpdateRole('Dispatcher', 'dispatcher', false, 0, [
-    'view_home', 'view_inbox', 'inbox_reply', 'inbox_takeover', 'view_recordings',
-    'view_customers', 'view_leads', 'book_jobs', 'dispatch_jobs', 'view_exceptions',
-    'view_projects'
-  ]);
-
-  const salesRole = await createOrUpdateRole('Sales Manager', 'sales-manager', false, 15000, [
-    'view_home', 'view_inbox', 'inbox_reply', 'inbox_takeover', 'view_recordings',
-    'view_customers', 'view_leads', 'book_jobs', 'view_estimates', 'edit_estimates',
-    'approve_actions', 'view_exceptions', 'view_financial', 'view_workflows',
-    'manage_workflows', 'view_results', 'view_knowledge', 'view_projects'
-  ]);
-
-  const techRole = await createOrUpdateRole('Field Technician', 'technician', false, 0, [
-    'tech_app'
-  ]);
-
-  const financeRole = await createOrUpdateRole('Finance / AR', 'finance', false, 5000, [
-    'view_home', 'view_customers', 'view_financial', 'view_invoices', 'manage_ar',
-    'pay_actions', 'approve_actions', 'view_exceptions', 'view_results', 'view_audit'
-  ]);
-
-  console.log('✅ Seeded 7 standard roles for Desert Air.');
-
-  // 4. Seed Demo Users
   const usersToSeed = [
     { email: 'owner@pashupat.cloud', name: 'Michael Carter', roleId: ownerRole.id },
-    { email: 'admin@pashupat.cloud', name: 'Jennifer Morgan', roleId: adminRole.id },
     { email: 'office@pashupat.cloud', name: 'Amanda Brooks', roleId: officeRole.id },
     { email: 'dispatcher@pashupat.cloud', name: 'Robert Martinez', roleId: dispatcherRole.id },
     { email: 'sales@pashupat.cloud', name: 'Daniel Reed', roleId: salesRole.id },
@@ -179,7 +205,7 @@ async function main() {
     });
   }
 
-  console.log('✅ Seeded 7 demo users (password: password123)');
+  console.log('✅ Seeded 6 demo users for Desert Air (password: password123)');
   console.log('✨ Seed complete!');
 }
 
@@ -191,4 +217,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-
