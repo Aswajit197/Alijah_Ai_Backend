@@ -72,6 +72,7 @@ export class SuperAdminService {
     plan?: 'STARTER' | 'GROWTH' | 'OPERATIONS' | 'ENTERPRISE';
     ownerName: string;
     ownerEmail: string;
+    ownerPassword?: string;
   }) {
     const slug = data.slug.toLowerCase().trim();
     const ownerEmail = data.ownerEmail.toLowerCase().trim();
@@ -162,20 +163,22 @@ export class SuperAdminService {
   static async resendTenantInvite(tenantId: string) {
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      include: {
-        users: {
-          where: { role: { slug: 'owner' } },
-          include: { role: true },
-          take: 1,
-        },
-      },
     });
 
     if (!tenant) {
       throw new Error('Tenant not found.');
     }
 
-    const ownerUser = tenant.users[0];
+    const ownerUser = await prisma.user.findFirst({
+      where: {
+        tenantId: tenant.id,
+        role: { slug: 'owner' },
+      },
+      include: {
+        role: true,
+      },
+    });
+
     if (!ownerUser) {
       throw new Error('No owner account found for this tenant.');
     }
