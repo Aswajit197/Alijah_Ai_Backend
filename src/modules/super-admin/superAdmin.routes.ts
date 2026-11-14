@@ -13,6 +13,7 @@ router.use(authenticate, requireSuperAdmin);
 // Tenant management
 router.get('/tenants', SuperAdminController.listTenants);
 router.post('/tenants', SuperAdminController.createTenant);
+router.post('/tenants/:id/resend-invite', SuperAdminController.resendInvite);
 router.patch('/tenants/:id/status', SuperAdminController.updateStatus);
 
 // Role & Permission Management (SuperAdmin Only)

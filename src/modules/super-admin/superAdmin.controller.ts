@@ -66,6 +66,16 @@ export class SuperAdminController {
     }
   }
 
+  static async resendInvite(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const result = await SuperAdminService.resendTenantInvite(id);
+      return successResponse(res, result, 'Invitation link resent successfully');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
+
   static async updateStatus(req: Request, res: Response) {
     try {
       const id = String(req.params.id);

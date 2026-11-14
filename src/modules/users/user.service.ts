@@ -1,5 +1,7 @@
+import crypto from 'crypto';
 import { prisma } from '../../config/database.js';
 import { hashPassword } from '../../utils/password.js';
+import { MailService } from '../../services/mail.service.js';
 
 export class UserService {
   static async listUsers(tenantId: string) {
@@ -11,6 +13,8 @@ export class UserService {
         name: true,
         phone: true,
         isActive: true,
+        isInviteAccepted: true,
+        inviteExpiresAt: true,
         createdAt: true,
         role: {
           select: {
@@ -50,7 +54,14 @@ export class UserService {
       throw new Error(`User with email '${email}' already exists in your company.`);
     }
 
-    const initialPassword = data.password || 'Welcome123!';
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+    const inviteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    const initialPassword = data.password || crypto.randomBytes(16).toString('hex');
     const passwordHash = await hashPassword(initialPassword);
 
     const user = await prisma.user.create({
@@ -61,6 +72,9 @@ export class UserService {
         phone: data.phone,
         roleId: role.id,
         passwordHash,
+        inviteToken,
+        inviteExpiresAt,
+        isInviteAccepted: false,
       },
       select: {
         id: true,
@@ -68,6 +82,8 @@ export class UserService {
         name: true,
         phone: true,
         isActive: true,
+        isInviteAccepted: true,
+        inviteExpiresAt: true,
         role: {
           select: {
             id: true,
@@ -79,9 +95,23 @@ export class UserService {
       },
     });
 
+    const companyAppUrl = process.env.COMPANY_APP_URL || 'http://localhost:3000';
+    const inviteLink = `${companyAppUrl}/set-password?token=${inviteToken}`;
+
+    await MailService.sendInvitation({
+      to: email,
+      recipientName: data.name,
+      tenantName: tenant?.name || 'Your Company',
+      roleName: role.name,
+      inviteLink,
+      expiresInHours: 24,
+    });
+
     return {
       user,
-      temporaryPassword: initialPassword,
+      inviteToken,
+      inviteLink,
+      inviteExpiresAt,
     };
   }
 

@@ -1,8 +1,146 @@
 import { prisma } from '../../config/database.js';
-import { verifyPassword } from '../../utils/password.js';
+import { verifyPassword, hashPassword } from '../../utils/password.js';
 import { signTenantUserToken } from '../../utils/jwt.js';
 
 export class TenantAuthService {
+  /**
+   * Validates a one-time invitation token.
+   */
+  static async getInvitationByToken(token: string) {
+    if (!token) {
+      throw new Error('Invitation token is required.');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { inviteToken: token },
+      include: {
+        tenant: true,
+        role: true,
+      },
+    });
+
+    if (!user) {
+      throw new Error('Invalid or non-existent invitation link.');
+    }
+
+    if (user.isInviteAccepted) {
+      throw new Error('This invitation has already been accepted. Please sign in with your password.');
+    }
+
+    if (user.inviteExpiresAt && user.inviteExpiresAt < new Date()) {
+      throw new Error('This invitation link has expired (24-hour validity). Please request a new invite.');
+    }
+
+    return {
+      valid: true,
+      email: user.email,
+      name: user.name,
+      tenantName: user.tenant.name,
+      tenantSlug: user.tenant.slug,
+      role: user.role.name,
+      expiresAt: user.inviteExpiresAt,
+    };
+  }
+
+  /**
+   * Sets the user's password using the one-time invitation token and logs them in.
+   */
+  static async setPasswordWithToken(data: { token: string; password: string }) {
+    if (!data.token) {
+      throw new Error('Invitation token is required.');
+    }
+
+    if (!data.password || data.password.length < 8) {
+      throw new Error('Password must be at least 8 characters long.');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { inviteToken: data.token },
+      include: {
+        tenant: true,
+        role: {
+          include: {
+            permissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new Error('Invalid or non-existent invitation link.');
+    }
+
+    if (user.isInviteAccepted) {
+      throw new Error('This invitation has already been used. Please log in.');
+    }
+
+    if (user.inviteExpiresAt && user.inviteExpiresAt < new Date()) {
+      throw new Error('This invitation link has expired. Please contact your administrator for a new invite.');
+    }
+
+    const passwordHash = await hashPassword(data.password);
+
+    // Update user record: set new password, mark invite accepted, clear single-use token
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        isInviteAccepted: true,
+        inviteToken: null,
+        inviteExpiresAt: null,
+      },
+      include: {
+        tenant: true,
+        role: {
+          include: {
+            permissions: {
+              include: {
+                permission: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Auto-login upon setting password
+    const token = signTenantUserToken({
+      sub: updatedUser.id,
+      tenantId: updatedUser.tenantId,
+      roleId: updatedUser.roleId,
+      roleSlug: updatedUser.role.slug,
+      email: updatedUser.email,
+      name: updatedUser.name,
+    });
+
+    const permissions = updatedUser.role.slug === 'owner' || updatedUser.role.slug === 'admin'
+      ? ['*']
+      : updatedUser.role.permissions.map((rp) => rp.permissionId);
+
+    return {
+      token,
+      user: {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        tenantId: updatedUser.tenantId,
+        tenantName: updatedUser.tenant.name,
+        tenantSlug: updatedUser.tenant.slug,
+        role: {
+          id: updatedUser.role.id,
+          name: updatedUser.role.name,
+          slug: updatedUser.role.slug,
+          approvalLimit: Number(updatedUser.role.approvalLimit),
+          permissions,
+        },
+      },
+    };
+  }
+
   static async login(data: { email: string; password: string; tenantSlug?: string }) {
     const email = data.email.toLowerCase().trim();
 

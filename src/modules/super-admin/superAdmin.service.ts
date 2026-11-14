@@ -1,6 +1,8 @@
+import crypto from 'crypto';
 import { prisma } from '../../config/database.js';
 import { hashPassword, verifyPassword } from '../../utils/password.js';
 import { signSuperAdminToken } from '../../utils/jwt.js';
+import { MailService } from '../../services/mail.service.js';
 
 export class SuperAdminService {
   static async login(email: string, password: string) {
@@ -37,6 +39,18 @@ export class SuperAdminService {
   static async listTenants() {
     return prisma.tenant.findMany({
       include: {
+        users: {
+          where: { role: { slug: 'owner' } },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            isInviteAccepted: true,
+            inviteExpiresAt: true,
+            inviteToken: true,
+          },
+          take: 1,
+        },
         _count: {
           select: {
             users: true,
@@ -58,9 +72,9 @@ export class SuperAdminService {
     plan?: 'STARTER' | 'GROWTH' | 'OPERATIONS' | 'ENTERPRISE';
     ownerName: string;
     ownerEmail: string;
-    ownerPassword?: string;
   }) {
     const slug = data.slug.toLowerCase().trim();
+    const ownerEmail = data.ownerEmail.toLowerCase().trim();
 
     const existing = await prisma.tenant.findUnique({ where: { slug } });
     if (existing) {
@@ -74,10 +88,15 @@ export class SuperAdminService {
       throw new Error("System error: Global 'owner' role not found. Please run seed script.");
     }
 
-    const initialPassword = data.ownerPassword || 'DesertAir2026!';
-    const passwordHash = await hashPassword(initialPassword);
+    // Generate secure single-use invitation token with 24-hour expiration
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+    const inviteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
 
-    return prisma.$transaction(async (tx) => {
+    // Temporary random password hash until owner activates account
+    const tempRandomPass = crypto.randomBytes(16).toString('hex');
+    const passwordHash = await hashPassword(tempRandomPass);
+
+    const result = await prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: {
           name: data.name,
@@ -93,10 +112,13 @@ export class SuperAdminService {
       const ownerUser = await tx.user.create({
         data: {
           tenantId: tenant.id,
-          email: data.ownerEmail.toLowerCase().trim(),
+          email: ownerEmail,
           name: data.ownerName,
           passwordHash,
           roleId: ownerRole.id,
+          inviteToken,
+          inviteExpiresAt,
+          isInviteAccepted: false,
         },
         include: {
           role: true,
@@ -110,10 +132,84 @@ export class SuperAdminService {
           email: ownerUser.email,
           name: ownerUser.name,
           role: ownerUser.role.name,
+          isInviteAccepted: false,
+          inviteExpiresAt,
         },
-        temporaryPassword: initialPassword,
       };
     });
+
+    const companyAppUrl = process.env.COMPANY_APP_URL || 'http://localhost:3000';
+    const inviteLink = `${companyAppUrl}/set-password?token=${inviteToken}`;
+
+    // Dispatch invitation email (or log preview if SMTP unconfigured)
+    await MailService.sendInvitation({
+      to: ownerEmail,
+      recipientName: data.ownerName,
+      tenantName: data.name,
+      roleName: ownerRole.name,
+      inviteLink,
+      expiresInHours: 24,
+    });
+
+    return {
+      ...result,
+      inviteToken,
+      inviteLink,
+      inviteExpiresAt,
+    };
+  }
+
+  static async resendTenantInvite(tenantId: string) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      include: {
+        users: {
+          where: { role: { slug: 'owner' } },
+          include: { role: true },
+          take: 1,
+        },
+      },
+    });
+
+    if (!tenant) {
+      throw new Error('Tenant not found.');
+    }
+
+    const ownerUser = tenant.users[0];
+    if (!ownerUser) {
+      throw new Error('No owner account found for this tenant.');
+    }
+
+    const inviteToken = crypto.randomBytes(32).toString('hex');
+    const inviteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    await prisma.user.update({
+      where: { id: ownerUser.id },
+      data: {
+        inviteToken,
+        inviteExpiresAt,
+        isInviteAccepted: false,
+      },
+    });
+
+    const companyAppUrl = process.env.COMPANY_APP_URL || 'http://localhost:3000';
+    const inviteLink = `${companyAppUrl}/set-password?token=${inviteToken}`;
+
+    await MailService.sendInvitation({
+      to: ownerUser.email,
+      recipientName: ownerUser.name,
+      tenantName: tenant.name,
+      roleName: ownerUser.role.name,
+      inviteLink,
+      expiresInHours: 24,
+    });
+
+    return {
+      success: true,
+      ownerEmail: ownerUser.email,
+      inviteLink,
+      inviteExpiresAt,
+    };
   }
 
   static async updateTenantStatus(id: string, status: 'ACTIVE' | 'SUSPENDED' | 'TRIAL' | 'ARCHIVED') {
@@ -220,7 +316,7 @@ export class SuperAdminService {
     const role = await prisma.role.findUnique({
       where: { id },
       include: {
-        _count: {
+        _count: { 
           select: { users: true },
         },
       },
