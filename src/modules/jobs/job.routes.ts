@@ -5,6 +5,9 @@ import { enforceTenantIsolation } from '../../middleware/tenantContext.js';
 
 const router = Router();
 
+// Public Customer Tracking endpoint (unauthenticated)
+router.get('/public-track/:id', JobController.getPublicTracking);
+
 router.use(authenticate, requireTenantUser, enforceTenantIsolation);
 
 // Read routes

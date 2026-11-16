@@ -133,4 +133,14 @@ export class JobController {
       return errorResponse(res, err.message, 400);
     }
   }
+
+  static async getPublicTracking(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const result = await JobService.getPublicTracking(id);
+      return successResponse(res, result, 'Tracking details retrieved');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 404);
+    }
+  }
 }

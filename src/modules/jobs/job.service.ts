@@ -424,4 +424,80 @@ export class JobService {
       ],
     });
   }
+
+  /**
+   * Safe public tracking data for customers (no auth required)
+   */
+  static async getPublicTracking(jobId: string) {
+    const job = await prisma.job.findUnique({
+      where: { id: jobId },
+      include: {
+        customer: {
+          select: {
+            name: true,
+            companyName: true,
+            address: true,
+          },
+        },
+        equipment: {
+          select: {
+            name: true,
+            brand: true,
+            modelNumber: true,
+            type: true,
+          },
+        },
+        technician: {
+          select: {
+            name: true,
+            role: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+        tenant: {
+          select: {
+            name: true,
+            phone: true,
+            tradeType: true,
+          },
+        },
+      },
+    });
+
+    if (!job) {
+      throw new Error('Work order not found');
+    }
+
+    return {
+      id: job.id,
+      jobNumber: job.jobNumber,
+      title: job.title,
+      status: job.status,
+      priority: job.priority,
+      scheduledDate: job.scheduledDate,
+      scheduledStart: job.scheduledStart,
+      scheduledEnd: job.scheduledEnd,
+      serviceAddress: job.serviceAddress,
+      reportedIssue: job.reportedIssue,
+      notes: job.notes,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      customer: job.customer,
+      equipment: job.equipment,
+      technician: job.technician
+        ? {
+            name: job.technician.name,
+            role: (job.technician.role as any)?.name || 'Certified Field Technician',
+          }
+        : null,
+      company: {
+        name: job.tenant?.name || 'Service Operations',
+        phone: job.tenant?.phone || '(800) 555-0199',
+        tradeType: job.tenant?.tradeType || 'HVAC',
+      },
+    };
+  }
 }
