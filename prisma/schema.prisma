@@ -38,6 +38,7 @@ model Tenant {
   // Relations
   users        User[]
   customers    Customer[]
+  equipments   Equipment[]
   jobs         Job[]
   
   createdAt    DateTime      @default(now())
@@ -133,49 +134,85 @@ model User {
 }
 
 // =========================================================================
-// 5. Tenant Core Data Models (Examples of Tenant-Scoped Resources)
+// 5. Tenant Core Data Models (Customers, Equipment, Work Orders)
 // =========================================================================
 model Customer {
-  id           String    @id @default(cuid())
+  id           String       @id @default(cuid())
   tenantId     String
   name         String
+  customerType String       @default("RESIDENTIAL") // "RESIDENTIAL" | "COMMERCIAL"
+  companyName  String?      // Business / Facility name for commercial clients
   phone        String
   email        String?
   address      String?
   city         String?
   state        String?
   zipCode      String?
+  gateCode     String?      // Security gate / lockbox code
+  accessNotes  String?      // e.g. "Keybox behind meter. Watch for German Shepherd."
   
-  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  equipments   Equipment[]
   jobs         Job[]
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@index([tenantId])
+  @@index([phone])
   @@map("customers")
 }
 
-model Job {
+model Equipment {
   id             String    @id @default(cuid())
   tenantId       String
   customerId     String
-  title          String
-  status         JobStatus @default(LEAD)
-  priority       String    @default("NORMAL")
-  scheduledStart DateTime?
-  scheduledEnd   DateTime?
-  totalAmount    Decimal?  @db.Decimal(10, 2)
+  name           String    // e.g. "Rooftop Packaged Heat Pump 5-Ton"
+  type           String    @default("HVAC") // HVAC, WATER_HEATER, ELECTRICAL_PANEL, PLUMBING
+  brand          String    // Carrier, Trane, Lennox, Rheem, Square D, etc.
+  modelNumber    String?
+  serialNumber   String?
+  installYear    Int?
+  locationOnSite String?   // e.g. "Rooftop - Section B (North ladder)"
+  warrantyStatus String    @default("UNDER_WARRANTY") // "UNDER_WARRANTY" | "EXPIRED" | "UNKNOWN"
   notes          String?
-  
+
   tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  jobs           Job[]
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   @@index([tenantId])
   @@index([customerId])
+  @@index([serialNumber])
+  @@map("equipments")
+}
+
+model Job {
+  id             String     @id @default(cuid())
+  tenantId       String
+  customerId     String
+  equipmentId    String?
+  title          String
+  status         JobStatus  @default(LEAD)
+  priority       String     @default("NORMAL")
+  scheduledStart DateTime?
+  scheduledEnd   DateTime?
+  totalAmount    Decimal?   @db.Decimal(10, 2)
+  notes          String?
+  
+  tenant         Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  equipment      Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([equipmentId])
   @@map("jobs")
 }
 
