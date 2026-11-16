@@ -5,8 +5,9 @@ import { enforceTenantIsolation } from '../../middleware/tenantContext.js';
 
 const router = Router();
 
-// Public Customer Tracking endpoint (unauthenticated)
+// Public Customer Tracking & Self-Service Booking (unauthenticated)
 router.get('/public-track/:id', JobController.getPublicTracking);
+router.post('/public-request', JobController.createPublicRequest);
 
 router.use(authenticate, requireTenantUser, enforceTenantIsolation);
 

@@ -143,4 +143,13 @@ export class JobController {
       return errorResponse(res, err.message, 404);
     }
   }
+
+  static async createPublicRequest(req: Request, res: Response) {
+    try {
+      const result = await JobService.createPublicRequest(req.body);
+      return successResponse(res, result, 'Service request submitted successfully', 201);
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
 }

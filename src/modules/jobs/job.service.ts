@@ -27,6 +27,23 @@ export interface DispatchJobInput {
   notes?: string;
 }
 
+export interface PublicJobRequestInput {
+  tenantSlug?: string;
+  name: string;
+  companyName?: string;
+  phone: string;
+  email?: string;
+  address: string;
+  gateCode?: string;
+  accessNotes?: string;
+  title?: string;
+  reportedIssue: string;
+  priority?: 'EMERGENCY' | 'HIGH' | 'NORMAL' | 'LOW';
+  equipmentBrand?: string;
+  equipmentModel?: string;
+  preferredWindow?: string;
+}
+
 export class JobService {
   /**
    * Generates a readable job number e.g. "JOB-9041".
@@ -498,6 +515,122 @@ export class JobService {
         phone: job.tenant?.phone || '(800) 555-0199',
         tradeType: job.tenant?.tradeType || 'HVAC',
       },
+    };
+  }
+
+  /**
+   * Public customer-facing self-service booking.
+   * Auto-links or creates the Customer in the CRM, creates an unscheduled work order,
+   * and returns the job ID so the customer can track it live immediately.
+   */
+  static async createPublicRequest(input: PublicJobRequestInput) {
+    if (!input.name || !input.phone || !input.address || !input.reportedIssue) {
+      throw new Error('Name, phone, service address, and issue description are required.');
+    }
+
+    // 1. Locate tenant by slug or default to first active tenant
+    let tenant = null;
+    if (input.tenantSlug) {
+      tenant = await prisma.tenant.findUnique({
+        where: { slug: input.tenantSlug },
+      });
+    }
+    if (!tenant) {
+      tenant = await prisma.tenant.findFirst({
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'asc' },
+      });
+    }
+
+    if (!tenant) {
+      throw new Error('No service company active to receive requests');
+    }
+
+    const tenantId = tenant.id;
+
+    // 2. Check if customer already exists by phone or email
+    let customer = await prisma.customer.findFirst({
+      where: {
+        tenantId,
+        OR: [
+          { phone: input.phone },
+          ...(input.email ? [{ email: input.email }] : []),
+        ],
+      },
+    });
+
+    if (!customer) {
+      // Auto-create customer record in CRM
+      customer = await prisma.customer.create({
+        data: {
+          tenantId,
+          name: input.name,
+          companyName: input.companyName || undefined,
+          phone: input.phone,
+          email: input.email || undefined,
+          address: input.address,
+          gateCode: input.gateCode || undefined,
+          accessNotes: input.accessNotes || undefined,
+          customerType: input.companyName ? 'COMMERCIAL' : 'RESIDENTIAL',
+        },
+      });
+    }
+
+    // 3. Register equipment if provided and not yet registered
+    let equipmentId: string | undefined;
+    if (input.equipmentBrand) {
+      const existingEquip = await prisma.equipment.findFirst({
+        where: {
+          customerId: customer.id,
+          brand: { contains: input.equipmentBrand, mode: 'insensitive' },
+        },
+      });
+
+      if (existingEquip) {
+        equipmentId = existingEquip.id;
+      } else {
+        const newEquip = await prisma.equipment.create({
+          data: {
+            tenantId,
+            customerId: customer.id,
+            name: `${input.equipmentBrand} Unit`,
+            brand: input.equipmentBrand,
+            modelNumber: input.equipmentModel || undefined,
+            type: tenant.tradeType || 'HVAC',
+          },
+        });
+        equipmentId = newEquip.id;
+      }
+    }
+
+    // 4. Generate unique Job Number (e.g. JOB-8319)
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const jobNumber = `JOB-${randomSuffix}`;
+
+    // 5. Create Work Order in UNSCHEDULED state
+    const job = await prisma.job.create({
+      data: {
+        tenantId,
+        jobNumber,
+        customerId: customer.id,
+        equipmentId,
+        title: input.title || `Service Request: ${input.reportedIssue.slice(0, 45)}...`,
+        reportedIssue: input.reportedIssue,
+        serviceAddress: input.address,
+        gateCode: input.gateCode || customer.gateCode || undefined,
+        priority: input.priority || 'NORMAL',
+        status: 'UNSCHEDULED',
+        notes: input.preferredWindow ? `Preferred Window: ${input.preferredWindow}` : undefined,
+      },
+    });
+
+    return {
+      jobId: job.id,
+      jobNumber: job.jobNumber,
+      status: job.status,
+      customerName: customer.name,
+      companyName: tenant.name,
+      trackingUrl: `/track/${job.id}`,
     };
   }
 }
