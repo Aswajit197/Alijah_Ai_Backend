@@ -15,6 +15,7 @@ async function bootstrap() {
       console.log(`🛡️  Roles & RBAC:   http://localhost:${env.PORT}/api/v1/roles`);
       console.log(`👥 Users API:       http://localhost:${env.PORT}/api/v1/users`);
       console.log(`📦 Customers API:   http://localhost:${env.PORT}/api/v1/customers`);
+      console.log(`⚡ Jobs & Dispatch: http://localhost:${env.PORT}/api/v1/jobs`);
     });
   } catch (err) {
     console.error('❌ Failed to start server:', err);

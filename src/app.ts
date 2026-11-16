@@ -6,6 +6,7 @@ import { tenantAuthRoutes } from './modules/tenant-auth/auth.routes.js';
 import { roleRoutes } from './modules/roles/role.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
 import { customerRoutes } from './modules/customers/customer.routes.js';
+import { jobRoutes } from './modules/jobs/job.routes.js';
 import { errorResponse } from './utils/response.js';
 
 export const app = express();
@@ -34,6 +35,7 @@ app.use('/api/v1/auth', tenantAuthRoutes);
 app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/customers', customerRoutes);
+app.use('/api/v1/jobs', jobRoutes);
 
 // 404 Handler
 app.use((_req: Request, res: Response) => {

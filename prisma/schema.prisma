@@ -122,6 +122,7 @@ model User {
   
   tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   role               Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  jobsAssigned       Job[]     @relation("TechnicianJobs")
 
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -193,35 +194,44 @@ model Equipment {
 model Job {
   id             String     @id @default(cuid())
   tenantId       String
+  jobNumber      String?    // e.g. "JOB-9041"
   customerId     String
   equipmentId    String?
+  technicianId   String?
   title          String
-  status         JobStatus  @default(LEAD)
-  priority       String     @default("NORMAL")
-  scheduledStart DateTime?
-  scheduledEnd   DateTime?
+  status         JobStatus  @default(UNSCHEDULED)
+  priority       String     @default("NORMAL") // "EMERGENCY" | "HIGH" | "NORMAL" | "LOW"
+  scheduledDate  DateTime?  // Date for calendar
+  scheduledStart DateTime?  // Window start
+  scheduledEnd   DateTime?  // Window end
+  serviceAddress String?
+  gateCode       String?
+  reportedIssue  String?    // Symptoms reported by customer
+  notes          String?    // Tech notes
   totalAmount    Decimal?   @db.Decimal(10, 2)
-  notes          String?
   
   tenant         Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer       Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   equipment      Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  technician     User?      @relation("TechnicianJobs", fields: [technicianId], references: [id], onDelete: SetNull)
 
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
   @@index([tenantId])
   @@index([customerId])
+  @@index([technicianId])
   @@index([equipmentId])
+  @@index([status])
   @@map("jobs")
 }
 
 enum JobStatus {
-  LEAD
-  QUALIFIED
+  UNSCHEDULED
   SCHEDULED
   DISPATCHED
-  IN_PROGRESS
+  EN_ROUTE
+  ON_SITE
   COMPLETED
   CANCELLED
 }
