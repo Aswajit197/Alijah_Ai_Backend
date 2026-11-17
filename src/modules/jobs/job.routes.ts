@@ -8,6 +8,7 @@ const router = Router();
 // Public Customer Tracking & Self-Service Booking (unauthenticated)
 router.get('/company/:slug', JobController.getCompanyProfile);
 router.get('/public-track/:id', JobController.getPublicTracking);
+router.get('/public-track/:id/stream', JobController.streamPublicTracking);
 router.post('/public-request', JobController.createPublicRequest);
 
 router.use(authenticate, requireTenantUser, enforceTenantIsolation);

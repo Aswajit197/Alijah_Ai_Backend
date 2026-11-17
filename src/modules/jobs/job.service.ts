@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { JobStatus } from '@prisma/client';
+import { broadcastJobUpdate } from '../../utils/jobEvents.js';
 
 export interface CreateJobInput {
   customerId: string;
@@ -286,6 +287,11 @@ export class JobService {
         },
       },
     });
+
+    // Broadcast real-time SSE event to live tracking subscribers
+    this.broadcastTrackingUpdate(jobId);
+
+    return updated;
   }
 
   /**
@@ -310,7 +316,7 @@ export class JobService {
       updateData.notes = notes;
     }
 
-    return prisma.job.update({
+    const updated = await prisma.job.update({
       where: { id: jobId },
       data: updateData,
       include: {
@@ -319,6 +325,11 @@ export class JobService {
         technician: true,
       },
     });
+
+    // Broadcast real-time SSE event to live tracking subscribers
+    this.broadcastTrackingUpdate(jobId);
+
+    return updated;
   }
 
   /**
@@ -338,7 +349,7 @@ export class JobService {
     if (data.scheduledStart) updateData.scheduledStart = new Date(data.scheduledStart);
     if (data.scheduledEnd) updateData.scheduledEnd = new Date(data.scheduledEnd);
 
-    return prisma.job.update({
+    const updated = await prisma.job.update({
       where: { id: jobId },
       data: updateData,
       include: {
@@ -347,6 +358,23 @@ export class JobService {
         technician: true,
       },
     });
+
+    // Broadcast real-time SSE event to live tracking subscribers
+    this.broadcastTrackingUpdate(jobId);
+
+    return updated;
+  }
+
+  /**
+   * Helper to fetch fresh public tracking payload and broadcast it over SSE.
+   */
+  static async broadcastTrackingUpdate(jobId: string) {
+    try {
+      const payload = await this.getPublicTracking(jobId);
+      broadcastJobUpdate(jobId, payload);
+    } catch (err) {
+      console.error(`[SSE] Error broadcasting tracking update for job ${jobId}:`, err);
+    }
   }
 
   /**

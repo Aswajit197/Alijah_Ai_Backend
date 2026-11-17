@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { JobService } from './job.service.js';
 import { successResponse, errorResponse } from '../../utils/response.js';
+import { jobEvents } from '../../utils/jobEvents.js';
 
 const createJobSchema = z.object({
   customerId: z.string().min(1, 'Customer is required'),
@@ -141,6 +142,71 @@ export class JobController {
       return successResponse(res, result, 'Tracking details retrieved');
     } catch (err: any) {
       return errorResponse(res, err.message, 404);
+    }
+  }
+
+  /**
+   * Server-Sent Events (SSE) stream for real-time customer job tracking.
+   * Eliminates polling: server pushes updates instantly when technician status changes.
+   */
+  static async streamPublicTracking(req: Request, res: Response) {
+    const id = String(req.params.id);
+
+    try {
+      // 1. Fetch initial job tracking payload to verify job exists
+      const initialData = await JobService.getPublicTracking(id);
+
+      // 2. Set SSE Headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+
+      // 3. Immediately send current state as first event
+      res.write(`data: ${JSON.stringify(initialData)}\n\n`);
+
+      // 4. If already in terminal state (COMPLETED or CANCELLED), finish stream
+      if (initialData.status === 'COMPLETED' || initialData.status === 'CANCELLED') {
+        res.end();
+        return;
+      }
+
+      // 5. Listener for subsequent updates
+      const eventChannel = `job:${id}`;
+      const onJobUpdate = (updatedData: any) => {
+        try {
+          res.write(`data: ${JSON.stringify(updatedData)}\n\n`);
+          if (updatedData.status === 'COMPLETED' || updatedData.status === 'CANCELLED') {
+            cleanup();
+            res.end();
+          }
+        } catch {
+          cleanup();
+        }
+      };
+
+      jobEvents.on(eventChannel, onJobUpdate);
+
+      // 6. Keep-alive heartbeat every 20s to prevent reverse-proxy timeout
+      const heartbeatTimer = setInterval(() => {
+        try {
+          res.write(': heartbeat\n\n');
+        } catch {
+          cleanup();
+        }
+      }, 20000);
+
+      const cleanup = () => {
+        clearInterval(heartbeatTimer);
+        jobEvents.off(eventChannel, onJobUpdate);
+      };
+
+      req.on('close', cleanup);
+      req.on('end', cleanup);
+    } catch (err: any) {
+      return res.status(404).json({ success: false, message: err.message || 'Work order not found' });
     }
   }
 
