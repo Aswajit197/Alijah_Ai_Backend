@@ -519,6 +519,48 @@ export class JobService {
   }
 
   /**
+   * Retrieves public company profile by slug (or fallback to default tenant)
+   * for customer self-service booking page branding.
+   */
+  static async getCompanyProfile(slug?: string) {
+    let tenant = null;
+    if (slug && slug !== 'default') {
+      tenant = await prisma.tenant.findUnique({
+        where: { slug },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          tradeType: true,
+          phone: true,
+          address: true,
+        },
+      });
+    }
+
+    if (!tenant) {
+      tenant = await prisma.tenant.findFirst({
+        where: { status: 'ACTIVE' },
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          tradeType: true,
+          phone: true,
+          address: true,
+        },
+      });
+    }
+
+    if (!tenant) {
+      throw new Error('Company not found');
+    }
+
+    return tenant;
+  }
+
+  /**
    * Public customer-facing self-service booking.
    * Auto-links or creates the Customer in the CRM, creates an unscheduled work order,
    * and returns the job ID so the customer can track it live immediately.

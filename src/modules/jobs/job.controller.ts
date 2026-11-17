@@ -152,4 +152,14 @@ export class JobController {
       return errorResponse(res, err.message, 400);
     }
   }
+
+  static async getCompanyProfile(req: Request, res: Response) {
+    try {
+      const slug = req.params.slug ? String(req.params.slug) : undefined;
+      const result = await JobService.getCompanyProfile(slug);
+      return successResponse(res, result, 'Company profile retrieved');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 404);
+    }
+  }
 }
