@@ -113,6 +113,12 @@ export class CustomerService {
           orderBy: { createdAt: 'desc' },
         },
         jobs: {
+          include: {
+            equipment: true,
+            technician: {
+              select: { id: true, name: true, phone: true },
+            },
+          },
           orderBy: { createdAt: 'desc' },
           take: 10,
         },
