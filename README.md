@@ -2,6 +2,8 @@
 
 Enterprise Multi-Tenant backend engine for Elijah AI with Dynamic Role-Based Access Control (RBAC), permission gating, financial approval thresholds, and strict tenant isolation.
 
+👉 **Quick Step-by-Step Guide: [HOW_TO_RUN.md](HOW_TO_RUN.md)**
+
 ---
 
 ## 1. Quick Start

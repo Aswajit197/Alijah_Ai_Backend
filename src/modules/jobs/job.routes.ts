@@ -10,11 +10,14 @@ router.get('/company/:slug', JobController.getCompanyProfile);
 router.get('/public-track/:id', JobController.getPublicTracking);
 router.get('/public-track/:id/stream', JobController.streamPublicTracking);
 router.post('/public-request', JobController.createPublicRequest);
+router.post('/public-web-call', JobController.createPublicWebCall);
 
 router.use(authenticate, requireTenantUser, enforceTenantIsolation);
 
 // Read routes
 router.get('/', JobController.list);
+router.get('/voice-calls', JobController.listCalls);
+router.get('/voice-calls/:callId', JobController.getCallDetail);
 router.get('/technicians', JobController.listTechnicians);
 router.get('/active-tech', JobController.getActiveTechJob);
 router.get('/:id', JobController.getById);

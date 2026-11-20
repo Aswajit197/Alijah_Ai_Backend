@@ -14,6 +14,7 @@ export interface TenantUserTokenPayload {
   tenantId: string;
   roleId: string;
   roleSlug: string;
+  roles?: string[];
   email: string;
   name: string;
 }
@@ -30,8 +31,18 @@ export function signSuperAdminToken(payload: Omit<SuperAdminTokenPayload, 'type'
 export function signTenantUserToken(payload: Omit<TenantUserTokenPayload, 'type'>): string {
   const options: SignOptions = {
     expiresIn: env.JWT_EXPIRES_IN as any,
+    issuer: 'elijah-auth-dev',
+    audience: 'elijah-services',
   };
-  return jwt.sign({ ...payload, type: 'TENANT_USER' }, env.JWT_SECRET, options);
+  return jwt.sign(
+    {
+      ...payload,
+      type: 'TENANT_USER',
+      roles: payload.roles || [payload.roleSlug],
+    },
+    env.JWT_SECRET,
+    options
+  );
 }
 
 export function verifyToken(token: string): TokenPayload {

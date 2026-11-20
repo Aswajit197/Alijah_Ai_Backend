@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database.js';
 import { JobStatus } from '@prisma/client';
 import { broadcastJobUpdate } from '../../utils/jobEvents.js';
+import jwt from 'jsonwebtoken';
 
 export interface CreateJobInput {
   customerId: string;
@@ -35,6 +36,7 @@ export interface PublicJobRequestInput {
   phone: string;
   email?: string;
   address: string;
+  zipCode?: string;
   gateCode?: string;
   accessNotes?: string;
   title?: string;
@@ -67,6 +69,9 @@ export class JobService {
       search?: string;
     } = {}
   ) {
+    // Automatically sync any recent AI voice bookings from workflow-service
+    await this.syncAiWorkflowJobs(tenantId).catch(() => {});
+
     const where: any = { tenantId };
 
     if (filters.status && filters.status !== 'ALL') {
@@ -268,7 +273,7 @@ export class JobService {
     const scheduledEnd = new Date(data.scheduledEnd);
     const scheduledDate = data.scheduledDate ? new Date(data.scheduledDate) : scheduledStart;
 
-    return prisma.job.update({
+    const updated = await prisma.job.update({
       where: { id: jobId },
       data: {
         technicianId: data.technicianId,
@@ -617,6 +622,9 @@ export class JobService {
     }
 
     const tenantId = tenant.id;
+    const fullAddress = input.zipCode && !input.address.includes(input.zipCode)
+      ? `${input.address.trim()}, ${input.zipCode.trim()}`
+      : input.address.trim();
 
     // 2. Check if customer already exists by phone or email
     let customer = await prisma.customer.findFirst({
@@ -638,7 +646,7 @@ export class JobService {
           companyName: input.companyName || undefined,
           phone: input.phone,
           email: input.email || undefined,
-          address: input.address,
+          address: fullAddress,
           gateCode: input.gateCode || undefined,
           accessNotes: input.accessNotes || undefined,
           customerType: input.companyName ? 'COMMERCIAL' : 'RESIDENTIAL',
@@ -686,7 +694,7 @@ export class JobService {
         equipmentId,
         title: input.title || `Service Request: ${input.reportedIssue.slice(0, 45)}...`,
         reportedIssue: input.reportedIssue,
-        serviceAddress: input.address,
+        serviceAddress: fullAddress,
         gateCode: input.gateCode || customer.gateCode || undefined,
         priority: input.priority || 'NORMAL',
         status: 'UNSCHEDULED',
@@ -702,5 +710,232 @@ export class JobService {
       companyName: tenant.name,
       trackingUrl: `/track/${job.id}`,
     };
+  }
+
+  /**
+   * Registers a public browser WebRTC call with Retell / Voice-Service.
+   */
+  static async createPublicWebCall(tenantSlug?: string) {
+    const tenant = tenantSlug
+      ? await prisma.tenant.findFirst({ where: { slug: tenantSlug } })
+      : await prisma.tenant.findFirst();
+
+    const companyName = tenant?.name || 'Vanguard Electric & Power';
+
+    // 1. Generate dev JWT token for voice-service auth
+    const token = jwt.sign(
+      {
+        sub: 'public-caller',
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        roles: ['owner'],
+        name: companyName,
+      },
+      process.env.JWT_SECRET || 'super-secret-jwt-key-elijah-ai-2026-very-secure',
+      {
+        issuer: 'elijah-auth-dev',
+        audience: 'elijah-services',
+        expiresIn: '1h',
+      }
+    );
+
+    // 2. Fetch receptionist agent from voice-service
+    const voiceUrl = process.env.VOICE_SERVICE_URL || 'http://localhost:4002';
+    const agentsRes = await fetch(`${voiceUrl}/api/v1/agents`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const agentsData = (await agentsRes.json()) as any;
+    const agents = agentsData.data || [];
+    const receptionist = agents.find((a: any) => a.role === 'receptionist') || agents[0];
+
+    if (!receptionist) {
+      throw new Error('No receptionist voice agent configured');
+    }
+
+    // 3. Create Web Call
+    const webCallRes = await fetch(`${voiceUrl}/api/v1/web-calls`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ agentId: receptionist.id }),
+    });
+
+    const webCallData = (await webCallRes.json()) as any;
+    if (!webCallRes.ok || !webCallData.data) {
+      throw new Error(webCallData.error?.message || 'Failed to create voice call session');
+    }
+
+    return {
+      accessToken: webCallData.data.accessToken,
+      retellCallId: webCallData.data.call.retellCallId,
+      callId: webCallData.data.call.id,
+      companyName,
+    };
+  }
+
+  /**
+   * Syncs voice call bookings from workflow-service into core Prisma Postgres DB.
+   */
+  static async syncAiWorkflowJobs(tenantId: string) {
+    try {
+      const token = jwt.sign(
+        {
+          sub: 'backend-sync',
+          tenantId: '11111111-1111-4111-8111-111111111111',
+          roles: ['owner'],
+        },
+        process.env.JWT_SECRET || 'super-secret-jwt-key-elijah-ai-2026-very-secure',
+        {
+          issuer: 'elijah-auth-dev',
+          audience: 'elijah-services',
+          expiresIn: '1h',
+        }
+      );
+
+      const workflowUrl = process.env.WORKFLOW_SERVICE_URL || 'http://localhost:4004';
+      const res = await fetch(`${workflowUrl}/api/v1/service-requests?limit=20`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+
+      const body = (await res.json()) as any;
+      const requests = body.data || [];
+
+      for (const req of requests) {
+        if (!req.jobNumber) continue;
+
+        const slotStart = req.slotStart ? new Date(req.slotStart) : new Date();
+        const slotEnd = req.slotEnd ? new Date(req.slotEnd) : new Date(slotStart.getTime() + 2 * 3600 * 1000);
+
+        let jobStatus: JobStatus = 'SCHEDULED';
+        if (req.status === 'awaiting_technician_acceptance' || req.status === 'scheduled') {
+          jobStatus = 'SCHEDULED';
+        } else if (req.status === 'in_progress') {
+          jobStatus = 'ON_SITE';
+        } else if (req.status === 'completed' || req.status === 'closed') {
+          jobStatus = 'COMPLETED';
+        }
+
+        // Match technician if assigned
+        let techId: string | undefined;
+        if (req.technician?.name) {
+          const tech = await prisma.user.findFirst({
+            where: {
+              tenantId,
+              name: { contains: req.technician.name.split(' ')[0], mode: 'insensitive' },
+            },
+          });
+          if (tech) techId = tech.id;
+        }
+
+        const existing = await prisma.job.findFirst({
+          where: { tenantId, jobNumber: req.jobNumber },
+        });
+
+        if (!existing) {
+          let customer = await prisma.customer.findFirst({
+            where: { tenantId },
+          });
+          if (!customer) {
+            customer = await prisma.customer.create({
+              data: {
+                tenantId,
+                name: 'Voice Call Homeowner',
+                phone: '+16025550148',
+                address: '100 North Central Avenue, Phoenix, AZ 85004',
+                city: 'Phoenix',
+                state: 'AZ',
+                zipCode: '85004',
+              },
+            });
+          }
+
+          await prisma.job.create({
+            data: {
+              tenantId,
+              jobNumber: req.jobNumber,
+              customerId: customer.id,
+              technicianId: techId,
+              title: req.problem ? `AI Call: ${req.problem}` : `AI Voice Booking ${req.jobNumber}`,
+              reportedIssue: req.problem || 'Booked via Elijah 24/7 Voice Receptionist',
+              serviceAddress: '100 North Central Avenue, Phoenix, AZ 85004',
+              status: jobStatus,
+              priority: req.isEmergency ? 'EMERGENCY' : 'NORMAL',
+              scheduledDate: slotStart,
+              scheduledStart: slotStart,
+              scheduledEnd: slotEnd,
+            },
+          });
+        } else if (techId && existing.technicianId !== techId) {
+          await prisma.job.update({
+            where: { id: existing.id },
+            data: { technicianId: techId, status: jobStatus },
+          });
+        }
+      }
+    } catch {
+      // Ignore background sync errors
+    }
+  }
+
+  /**
+   * Lists live AI voice calls from voice-service.
+   */
+  static async listCalls() {
+    const token = jwt.sign(
+      {
+        sub: 'staff-user',
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        roles: ['owner'],
+        name: 'Vanguard Electric & Power',
+      },
+      process.env.JWT_SECRET || 'super-secret-jwt-key-elijah-ai-2026-very-secure',
+      {
+        issuer: 'elijah-auth-dev',
+        audience: 'elijah-services',
+        expiresIn: '1h',
+      }
+    );
+
+    const voiceUrl = process.env.VOICE_SERVICE_URL || 'http://localhost:4002';
+    const res = await fetch(`${voiceUrl}/api/v1/calls`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error('Failed to retrieve calls from voice-service');
+    }
+    const data = (await res.json()) as any;
+    return data.data || [];
+  }
+
+  /**
+   * Retrieves single live AI voice call details with transcript.
+   */
+  static async getCallDetail(callId: string) {
+    const token = jwt.sign(
+      {
+        sub: 'staff-user',
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        roles: ['owner'],
+        name: 'Vanguard Electric & Power',
+      },
+      process.env.JWT_SECRET || 'super-secret-jwt-key-elijah-ai-2026-very-secure',
+      {
+        issuer: 'elijah-auth-dev',
+        audience: 'elijah-services',
+        expiresIn: '1h',
+      }
+    );
+
+    const voiceUrl = process.env.VOICE_SERVICE_URL || 'http://localhost:4002';
+    const res = await fetch(`${voiceUrl}/api/v1/calls/${callId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error('Failed to retrieve call detail from voice-service');
+    }
+    const data = (await res.json()) as any;
+    return data.data;
   }
 }

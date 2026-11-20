@@ -228,4 +228,32 @@ export class JobController {
       return errorResponse(res, err.message, 404);
     }
   }
+
+  static async createPublicWebCall(req: Request, res: Response) {
+    try {
+      const { tenantSlug } = req.body || {};
+      const result = await JobService.createPublicWebCall(tenantSlug);
+      return successResponse(res, result, 'Voice call session initialized', 201);
+    } catch (err: any) {
+      return errorResponse(res, err.message, 500);
+    }
+  }
+
+  static async listCalls(_req: Request, res: Response) {
+    try {
+      const calls = await JobService.listCalls();
+      return successResponse(res, calls, 'Voice calls retrieved');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 500);
+    }
+  }
+
+  static async getCallDetail(req: Request, res: Response) {
+    try {
+      const call = await JobService.getCallDetail(String(req.params.callId));
+      return successResponse(res, call, 'Voice call detail retrieved');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 404);
+    }
+  }
 }
