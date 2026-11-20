@@ -30,6 +30,9 @@ const dispatchJobSchema = z.object({
   scheduledEnd: z.string().min(1, 'End time is required'),
   priority: z.enum(['EMERGENCY', 'HIGH', 'NORMAL', 'LOW']).optional(),
   notes: z.string().optional(),
+  serviceAddress: z.string().optional(),
+  gateCode: z.string().optional(),
+  reportedIssue: z.string().optional(),
 });
 
 const updateStatusSchema = z.object({
@@ -65,7 +68,8 @@ export class JobController {
 
   static async getActiveTechJob(req: Request, res: Response) {
     try {
-      const job = await JobService.getTechnicianActiveJob(req.tenantId!, req.tenantUser?.sub);
+      const isTech = req.tenantUser?.roleSlug === 'technician';
+      const job = await JobService.getTechnicianActiveJob(req.tenantId!, req.tenantUser?.sub, isTech);
       return successResponse(res, job);
     } catch (err: any) {
       return errorResponse(res, err.message, 500);

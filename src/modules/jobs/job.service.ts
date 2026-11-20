@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database.js';
 import { JobStatus } from '@prisma/client';
 import { broadcastJobUpdate } from '../../utils/jobEvents.js';
+import { MailService } from '../../services/mail.service.js';
 import jwt from 'jsonwebtoken';
 
 export interface CreateJobInput {
@@ -27,6 +28,9 @@ export interface DispatchJobInput {
   scheduledEnd: string;
   priority?: 'EMERGENCY' | 'HIGH' | 'NORMAL' | 'LOW';
   notes?: string;
+  serviceAddress?: string;
+  gateCode?: string;
+  reportedIssue?: string;
 }
 
 export interface PublicJobRequestInput {
@@ -220,7 +224,7 @@ export class JobService {
 
     const status: JobStatus = data.technicianId && scheduledStart ? 'SCHEDULED' : (data.status || 'UNSCHEDULED');
 
-    return prisma.job.create({
+    const created = await prisma.job.create({
       data: {
         tenantId,
         jobNumber,
@@ -247,6 +251,12 @@ export class JobService {
         },
       },
     });
+
+    if (created.technicianId) {
+      this.notifyTechnicianByEmail(created.id, created.technicianId, tenantId).catch(() => {});
+    }
+
+    return created;
   }
 
   /**
@@ -283,6 +293,9 @@ export class JobService {
         scheduledEnd,
         priority: data.priority || job.priority,
         notes: data.notes !== undefined ? data.notes : job.notes,
+        ...(data.serviceAddress !== undefined ? { serviceAddress: data.serviceAddress } : {}),
+        ...(data.gateCode !== undefined ? { gateCode: data.gateCode } : {}),
+        ...(data.reportedIssue !== undefined ? { reportedIssue: data.reportedIssue } : {}),
       },
       include: {
         customer: true,
@@ -295,6 +308,11 @@ export class JobService {
 
     // Broadcast real-time SSE event to live tracking subscribers
     this.broadcastTrackingUpdate(jobId);
+
+    // Notify assigned technician via email
+    if (updated.technicianId) {
+      this.notifyTechnicianByEmail(updated.id, updated.technicianId, tenantId).catch(() => {});
+    }
 
     return updated;
   }
@@ -367,6 +385,11 @@ export class JobService {
     // Broadcast real-time SSE event to live tracking subscribers
     this.broadcastTrackingUpdate(jobId);
 
+    // Notify assigned technician via email if newly assigned or changed
+    if (updated.technicianId && updated.technicianId !== job.technicianId) {
+      this.notifyTechnicianByEmail(updated.id, updated.technicianId, tenantId).catch(() => {});
+    }
+
     return updated;
   }
 
@@ -379,6 +402,56 @@ export class JobService {
       broadcastJobUpdate(jobId, payload);
     } catch (err) {
       console.error(`[SSE] Error broadcasting tracking update for job ${jobId}:`, err);
+    }
+  }
+
+  /**
+   * Sends an email notification to the assigned field technician.
+   */
+  static async notifyTechnicianByEmail(jobId: string, technicianId: string, tenantId: string) {
+    try {
+      const job = await prisma.job.findFirst({
+        where: { id: jobId, tenantId },
+        include: {
+          customer: true,
+          technician: true,
+          tenant: true,
+        },
+      });
+
+      if (!job || !job.technician || !job.technician.email) {
+        return;
+      }
+
+      const scheduledWindow = job.scheduledStart
+        ? `${new Date(job.scheduledStart).toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+          })} · ${new Date(job.scheduledStart).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })} – ${job.scheduledEnd ? new Date(job.scheduledEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'TBD'}`
+        : 'Immediate / As Soon As Possible';
+
+      const portalUrl = `${process.env.COMPANY_APP_URL || 'http://localhost:3000'}/tech`;
+
+      await MailService.sendJobAssignment({
+        to: job.technician.email,
+        technicianName: job.technician.name || 'Technician',
+        tenantName: job.tenant.name || 'Elijah AI Partner',
+        jobNumber: job.jobNumber || `JOB-${job.id.slice(-4)}`,
+        title: job.reportedIssue || job.title,
+        customerName: job.customer.name,
+        customerPhone: job.customer.phone,
+        serviceAddress: job.serviceAddress || job.customer.address || 'Address on file',
+        gateCode: job.gateCode || job.customer.gateCode,
+        scheduledWindow,
+        priority: job.priority,
+        portalUrl,
+      });
+    } catch (err: any) {
+      console.error(`[JOB SERVICE] Failed to send technician assignment email for job ${jobId}:`, err.message);
     }
   }
 
@@ -432,7 +505,7 @@ export class JobService {
   /**
    * Gets the active dispatched job for the logged-in technician (with graceful fallback for office managers/owners previewing the tech app).
    */
-  static async getTechnicianActiveJob(tenantId: string, technicianUserId?: string) {
+  static async getTechnicianActiveJob(tenantId: string, technicianUserId?: string, isTechnicianRole: boolean = false) {
     const where: any = {
       tenantId,
       status: {
@@ -456,9 +529,12 @@ export class JobService {
         ],
       });
       if (userJob) return userJob;
+
+      // If the logged-in user is a field technician, never show other technicians' jobs!
+      if (isTechnicianRole) return null;
     }
 
-    // Fallback: earliest active job in company for preview
+    // Fallback: earliest active job in company for preview (only for owners / office managers previewing)
     return prisma.job.findFirst({
       where,
       include: {
@@ -833,10 +909,60 @@ export class JobService {
           where: { tenantId, jobNumber: req.jobNumber },
         });
 
+        // 1. Resolve real customer from core-service simulator if customerId is present
+        let customer: any = null;
+        let customerAddressStr: string | undefined;
+
+        if (req.customerId) {
+          try {
+            const coreUrl = process.env.CORE_SERVICE_URL || 'http://localhost:4001';
+            const coreToken = process.env.CORE_SERVICE_TOKEN || 'replace-with-a-long-random-string';
+            const custRes = await fetch(`${coreUrl}/internal/v1/customers/${req.customerId}`, {
+              headers: {
+                'x-service-token': coreToken,
+                'x-tenant-id': '11111111-1111-4111-8111-111111111111',
+              },
+            });
+            if (custRes.ok) {
+              const custData = (await custRes.json()) as any;
+              const c = custData.data;
+              if (c && c.name) {
+                const addr = c.address;
+                customerAddressStr = addr
+                  ? `${addr.street || ''}, ${addr.city || ''}, ${addr.state || ''} ${addr.zip || ''}`.trim()
+                  : undefined;
+                const existingCust = await prisma.customer.findFirst({
+                  where: { tenantId, phone: c.phone },
+                });
+                if (existingCust) {
+                  customer = existingCust;
+                } else {
+                  customer = await prisma.customer.create({
+                    data: {
+                      tenantId,
+                      name: c.name,
+                      phone: c.phone || '+15000005421',
+                      email: c.email || undefined,
+                      address: customerAddressStr || 'Address on file',
+                      city: addr?.city || 'Phoenix',
+                      state: addr?.state || 'AZ',
+                      zipCode: addr?.zip || '85004',
+                    },
+                  });
+                }
+              }
+            }
+          } catch {
+            // Core service lookup failed, fallback gracefully
+          }
+        }
+
         if (!existing) {
-          let customer = await prisma.customer.findFirst({
-            where: { tenantId },
-          });
+          if (!customer) {
+            customer = await prisma.customer.findFirst({
+              where: { tenantId },
+            });
+          }
           if (!customer) {
             customer = await prisma.customer.create({
               data: {
@@ -851,7 +977,12 @@ export class JobService {
             });
           }
 
-          await prisma.job.create({
+          const serviceAddress =
+            customerAddressStr ||
+            customer.address ||
+            '100 North Central Avenue, Phoenix, AZ 85004';
+
+          const createdSyncJob = await prisma.job.create({
             data: {
               tenantId,
               jobNumber: req.jobNumber,
@@ -859,7 +990,7 @@ export class JobService {
               technicianId: techId,
               title: req.problem ? `AI Call: ${req.problem}` : `AI Voice Booking ${req.jobNumber}`,
               reportedIssue: req.problem || 'Booked via Elijah 24/7 Voice Receptionist',
-              serviceAddress: '100 North Central Avenue, Phoenix, AZ 85004',
+              serviceAddress,
               status: jobStatus,
               priority: req.isEmergency ? 'EMERGENCY' : 'NORMAL',
               scheduledDate: slotStart,
@@ -867,11 +998,32 @@ export class JobService {
               scheduledEnd: slotEnd,
             },
           });
-        } else if (techId && existing.technicianId !== techId) {
-          await prisma.job.update({
-            where: { id: existing.id },
-            data: { technicianId: techId, status: jobStatus },
-          });
+
+          if (techId) {
+            this.notifyTechnicianByEmail(createdSyncJob.id, techId, tenantId).catch(() => {});
+          }
+        } else {
+          // If existing job was associated with generic seed customer and we now have the real customer from core-service, update it!
+          const updates: any = {};
+          if (techId && existing.technicianId !== techId) {
+            updates.technicianId = techId;
+            updates.status = jobStatus;
+          }
+          if (customer && existing.customerId !== customer.id) {
+            updates.customerId = customer.id;
+            if (customerAddressStr) {
+              updates.serviceAddress = customerAddressStr;
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            await prisma.job.update({
+              where: { id: existing.id },
+              data: updates,
+            });
+            if (updates.technicianId) {
+              this.notifyTechnicianByEmail(existing.id, updates.technicianId, tenantId).catch(() => {});
+            }
+          }
         }
       }
     } catch {
