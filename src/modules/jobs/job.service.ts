@@ -909,18 +909,18 @@ export class JobService {
           where: { tenantId, jobNumber: req.jobNumber },
         });
 
-        // 1. Resolve real customer from core-service simulator if customerId is present
+        // 1. Resolve real customer from internal database if customerId is present
         let customer: any = null;
         let customerAddressStr: string | undefined;
 
         if (req.customerId) {
           try {
-            const coreUrl = process.env.CORE_SERVICE_URL || 'http://localhost:4001';
+            const coreUrl = process.env.CORE_SERVICE_URL || `http://localhost:${process.env.PORT || 5000}`;
             const coreToken = process.env.CORE_SERVICE_TOKEN || 'replace-with-a-long-random-string';
             const custRes = await fetch(`${coreUrl}/internal/v1/customers/${req.customerId}`, {
               headers: {
                 'x-service-token': coreToken,
-                'x-tenant-id': '11111111-1111-4111-8111-111111111111',
+                'x-tenant-id': tenantId,
               },
             });
             if (custRes.ok) {

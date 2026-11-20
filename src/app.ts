@@ -7,6 +7,7 @@ import { roleRoutes } from './modules/roles/role.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
 import { customerRoutes } from './modules/customers/customer.routes.js';
 import { jobRoutes } from './modules/jobs/job.routes.js';
+import { internalRoutes } from './modules/internal/internal.routes.js';
 import { errorResponse } from './utils/response.js';
 
 export const app = express();
@@ -21,6 +22,14 @@ app.use(
 app.use(express.json());
 
 // Health Check
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    service: 'Elijah AI Backend Core',
+  });
+});
+
 app.get('/api/v1/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
@@ -36,6 +45,9 @@ app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/jobs', jobRoutes);
+
+// Internal Microservice API Routes (for Retell voice-service & Temporal workflow-service)
+app.use('/internal/v1', internalRoutes);
 
 // 404 Handler
 app.use((_req: Request, res: Response) => {
