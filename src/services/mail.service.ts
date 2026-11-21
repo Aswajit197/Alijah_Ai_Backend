@@ -9,6 +9,14 @@ export interface SendInvitationParams {
   expiresInHours?: number;
 }
 
+export interface SendPasswordResetParams {
+  to: string;
+  recipientName: string;
+  tenantName: string;
+  resetLink: string;
+  expiresInHours?: number;
+}
+
 export interface SendJobAssignmentParams {
   to: string;
   technicianName: string;
@@ -252,6 +260,88 @@ export class MailService {
     console.log(`Location:    ${serviceAddress}`);
     if (gateCode) console.log(`Gate Code:   ${gateCode}`);
     console.log(`Mobile App:  ${portalUrl}`);
+    console.log('='.repeat(68) + '\n');
+
+    return { success: true, simulated: true };
+  }
+
+  /**
+   * Dispatches a password reset email.
+   * If SMTP is not configured, logs the preview to the console for frictionless local development.
+   */
+  static async sendPasswordReset(params: SendPasswordResetParams): Promise<{ success: boolean; simulated: boolean }> {
+    const { to, recipientName, tenantName, resetLink, expiresInHours = 1 } = params;
+    const transporter = this.getTransporter();
+
+    const subject = `Reset your password for ${tenantName} — Elijah AI`;
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #080C15; color: #F8FAFC; padding: 40px 20px;">
+        <div style="max-width: 560px; margin: 0 auto; background-color: #0E1526; border: 1px solid #1E2C4A; border-radius: 20px; padding: 36px;">
+          <div style="margin-bottom: 24px;">
+            <span style="font-size: 20px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.5px;">ELIJAH <span style="color: #4F46E5;">AI</span></span>
+          </div>
+
+          <h1 style="font-size: 20px; font-weight: 700; color: #FFFFFF; margin-bottom: 12px;">
+            Password Reset Request
+          </h1>
+
+          <p style="font-size: 14px; line-height: 1.6; color: #94A3B8; margin-bottom: 24px;">
+            Hello ${recipientName}, a password reset was requested for your account at <strong>${tenantName}</strong>.
+          </p>
+
+          <div style="background-color: #151F36; border: 1px solid #1E2C4A; border-radius: 12px; padding: 16px; margin-bottom: 28px;">
+            <p style="margin: 0; font-size: 13px; color: #CBD5E1;">
+              Click the button below to choose a new password. If you did not make this request, you can safely ignore this email.
+            </p>
+            <p style="margin: 8px 0 0 0; font-size: 12px; color: #F59E0B; font-weight: 600;">
+              ⚠️ This link is valid for ${expiresInHours} hour.
+            </p>
+          </div>
+
+          <div style="text-align: center; margin-bottom: 30px;">
+            <a href="${resetLink}" style="display: inline-block; background-color: #4F46E5; color: #FFFFFF; padding: 14px 28px; border-radius: 12px; font-size: 14px; font-weight: 600; text-decoration: none; box-shadow: 0 4px 14px rgba(79, 70, 229, 0.4);">
+              Reset Your Password →
+            </a>
+          </div>
+
+          <p style="font-size: 12px; color: #64748B; margin-bottom: 8px;">
+            If the button doesn't work, copy and paste this link in your browser:
+          </p>
+          <p style="font-size: 11px; color: #06B6D4; word-break: break-all; background-color: #080C15; padding: 10px; border-radius: 8px; border: 1px solid #1E2C4A;">
+            ${resetLink}
+          </p>
+
+          <hr style="border: none; border-top: 1px solid #1E2C4A; margin: 28px 0;" />
+
+          <p style="font-size: 11px; color: #64748B; margin: 0; text-align: center;">
+            Elijah AI · Autonomous Operations Platform
+          </p>
+        </div>
+      </div>
+    `;
+
+    if (transporter) {
+      try {
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM || '"Elijah AI Security" <security@elijah.ai>',
+          to,
+          subject,
+          html,
+        });
+        console.log(`[MAIL SERVICE] Password reset email sent via SMTP to: ${to}`);
+        return { success: true, simulated: false };
+      } catch (err: any) {
+        console.warn(`[MAIL SERVICE] SMTP failed (${err.message}), falling back to console log preview.`);
+      }
+    }
+
+    // Console logging fallback for development
+    console.log('\n' + '='.repeat(68));
+    console.log('🔑 [MAIL SERVICE - PASSWORD RESET LINK (DEV PREVIEW)]');
+    console.log(`To:          ${recipientName} <${to}>`);
+    console.log(`Company:     ${tenantName}`);
+    console.log(`Reset Link:  ${resetLink}`);
+    console.log(`Expires:     ${expiresInHours} hour`);
     console.log('='.repeat(68) + '\n');
 
     return { success: true, simulated: true };

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { InternalService } from './internal.service.js';
 import { InternalRequest } from './internal.auth.js';
 import { toUuid } from './id-mapper.js';
+import { TenantSettingsService } from '../../services/tenantSettings.service.js';
 
 export class InternalController {
   /**
@@ -328,9 +329,32 @@ export class InternalController {
 
   /**
    * POST /internal/v1/policy/check
+   * Rule 1: The Company Dispatch Policy (dispatch.assign)
+   * Rule 2: Invoice Approval Threshold (invoice.send)
    */
-  static async checkPolicy(_req: InternalRequest, res: Response) {
-    return res.json({ data: { decision: 'APPROVE' } });
+  static async checkPolicy(req: InternalRequest, res: Response) {
+    const { action, amountCents } = req.body || {};
+    const tenantId = req.tenantId || 'cmwg840lc0001yeczrxxdxt6r';
+    const settings = TenantSettingsService.getSettings(tenantId);
+
+    // Rule 1: The Company Dispatch Policy (dispatch.assign)
+    // ALLOW -> Autonomous AI Dispatch (Assign top candidate)
+    // RECOMMEND -> Dispatcher Triage Queue (Awaiting manual decision)
+    if (action === 'dispatch.assign') {
+      const decision = settings.dispatchPolicy || 'ALLOW';
+      return res.json({ data: { decision } });
+    }
+
+    // Rule 2: Invoice Approval Threshold (invoice.send)
+    if (action === 'invoice.send') {
+      const limitCents = (settings.invoiceApprovalThreshold || 5000) * 100;
+      if (amountCents && amountCents > limitCents) {
+        return res.json({ data: { decision: 'REQUIRE_APPROVAL' } });
+      }
+      return res.json({ data: { decision: 'APPROVE' } });
+    }
+
+    return res.json({ data: { decision: 'ALLOW' } });
   }
 
   /**

@@ -2,6 +2,7 @@ import { prisma } from '../../config/database.js';
 import { JobStatus } from '@prisma/client';
 import { broadcastJobUpdate } from '../../utils/jobEvents.js';
 import { MailService } from '../../services/mail.service.js';
+import { TenantSettingsService } from '../../services/tenantSettings.service.js';
 import jwt from 'jsonwebtoken';
 
 export interface CreateJobInput {
@@ -353,6 +354,159 @@ export class JobService {
     this.broadcastTrackingUpdate(jobId);
 
     return updated;
+  }
+
+  /**
+   * Handles a technician declining a job offer.
+   * Autonomous dispatch: Automatically attempts to reassign the work order to the next available technician.
+   * If all technicians have declined or are unavailable, escalates to the dispatch triage queue.
+   */
+  static async declineJob(
+    tenantId: string,
+    jobId: string,
+    technicianUserId?: string,
+    reason?: string
+  ) {
+    const job = await prisma.job.findFirst({
+      where: { id: jobId, tenantId },
+      include: {
+        customer: true,
+        equipment: true,
+        technician: true,
+        tenant: true,
+      },
+    });
+
+    if (!job) {
+      throw new Error('Work order not found');
+    }
+
+    const currentTechName = job.technician?.name || 'Assigned Technician';
+    const decliningTechId = technicianUserId || job.technicianId;
+
+    // 1. Search for other active certified technicians in the same company
+    const candidateTechnicians = await prisma.user.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        id: decliningTechId ? { not: decliningTechId } : undefined,
+        role: {
+          slug: { in: ['technician'] },
+        },
+      },
+      include: {
+        jobsAssigned: {
+          where: {
+            status: { in: ['SCHEDULED', 'DISPATCHED', 'EN_ROUTE', 'ON_SITE'] },
+          },
+        },
+      },
+    });
+
+    // Filter out anyone who has already declined this job (recorded in notes)
+    const validCandidates = candidateTechnicians.filter((t) => {
+      if (!job.notes) return true;
+      return !job.notes.includes(`Declined by ${t.name}`);
+    });
+
+    // Sort by active workload ascending (lightest workload gets the job first)
+    validCandidates.sort((a, b) => a.jobsAssigned.length - b.jobsAssigned.length);
+
+    if (validCandidates.length > 0) {
+      // Reassign to next best technician
+      const nextTech = validCandidates[0];
+      const reassignNote = `[Elijah AI Auto-Dispatch] Declined by ${currentTechName}${
+        reason ? ` (Reason: ${reason})` : ''
+      }. Automatically re-assigned to ${nextTech.name}.`;
+
+      const updated = await prisma.job.update({
+        where: { id: jobId },
+        data: {
+          technicianId: nextTech.id,
+          status: 'SCHEDULED', // Offered to new tech
+          notes: job.notes ? `${job.notes}\n${reassignNote}` : reassignNote,
+        },
+        include: {
+          customer: true,
+          equipment: true,
+          technician: true,
+        },
+      });
+
+      // Dispatch assignment email to next technician
+      const windowStr = updated.scheduledStart && updated.scheduledEnd
+        ? `${new Date(updated.scheduledStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(updated.scheduledEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        : 'Assigned Schedule Window';
+
+      try {
+        await MailService.sendJobAssignment({
+          to: nextTech.email,
+          technicianName: nextTech.name,
+          tenantName: job.tenant.name,
+          jobNumber: updated.jobNumber || 'JOB',
+          title: updated.title,
+          customerName: job.customer?.name || 'Customer',
+          customerPhone: job.customer?.phone || '',
+          serviceAddress: updated.serviceAddress || job.customer?.address || '',
+          gateCode: updated.gateCode,
+          scheduledWindow: windowStr,
+          priority: updated.priority,
+          portalUrl: `${process.env.COMPANY_FRONTEND_URL || 'http://localhost:3000'}/tech`,
+        });
+      } catch (mailErr) {
+        console.warn('Mail notification failed:', mailErr);
+      }
+
+      this.broadcastTrackingUpdate(jobId);
+
+      return {
+        reassigned: true,
+        escalated: false,
+        previousTechnician: currentTechName,
+        newTechnician: nextTech.name,
+        newTechnicianId: nextTech.id,
+        job: updated,
+        message: `Work order declined by ${currentTechName}. Elijah AI autonomous dispatch automatically re-assigned it to ${nextTech.name}.`,
+      };
+    } else {
+      // No available technician - Escalate to Dispatcher Queue
+      const escalationNote = `[ESCALATION] Declined by ${currentTechName}${
+        reason ? ` (Reason: ${reason})` : ''
+      }. No other available technicians in route. Escalated to Dispatcher Triage Queue.`;
+
+      const updated = await prisma.job.update({
+        where: { id: jobId },
+        data: {
+          technicianId: null,
+          status: 'UNSCHEDULED',
+          priority: 'HIGH', // Escalate priority
+          notes: job.notes ? `${job.notes}\n${escalationNote}` : escalationNote,
+        },
+        include: {
+          customer: true,
+          equipment: true,
+          technician: true,
+        },
+      });
+
+      this.broadcastTrackingUpdate(jobId);
+
+      return {
+        reassigned: false,
+        escalated: true,
+        previousTechnician: currentTechName,
+        newTechnician: null,
+        job: updated,
+        message: `Work order declined. No other available technicians found — escalated to Dispatcher Triage Queue.`,
+      };
+    }
+  }
+
+  /**
+   * Technician accepts the offered job.
+   */
+  static async acceptJob(tenantId: string, jobId: string) {
+    return this.updateJobStatus(tenantId, jobId, 'DISPATCHED');
   }
 
   /**
@@ -761,7 +915,7 @@ export class JobService {
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const jobNumber = `JOB-${randomSuffix}`;
 
-    // 5. Create Work Order in UNSCHEDULED state
+    // 5. Create Work Order
     const job = await prisma.job.create({
       data: {
         tenantId,
@@ -778,10 +932,85 @@ export class JobService {
       },
     });
 
+    // Rule 1: The Company Dispatch Policy (dispatch.assign)
+    const settings = TenantSettingsService.getSettings(tenantId);
+    let finalStatus = 'UNSCHEDULED';
+    let assignedTechName: string | null = null;
+
+    if (settings.dispatchPolicy === 'ALLOW') {
+      // Mode A: Autonomous AI Dispatch (ALLOW) -> Immediate auto-dispatch
+      const availableTechs = await prisma.user.findMany({
+        where: {
+          tenantId,
+          isActive: true,
+          role: { slug: { in: ['technician'] } },
+        },
+        include: { role: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (availableTechs.length > 0) {
+        // Evaluate candidate workload and distance
+        const scoredTechs = await Promise.all(
+          availableTechs.map(async (tech) => {
+            const activeCount = await prisma.job.count({
+              where: {
+                tenantId,
+                technicianId: tech.id,
+                status: { in: ['DISPATCHED', 'EN_ROUTE', 'ON_SITE'] },
+              },
+            });
+            return { tech, activeCount };
+          })
+        );
+        scoredTechs.sort((a, b) => a.activeCount - b.activeCount);
+        const bestTech = scoredTechs[0].tech;
+
+        const scheduledStart = new Date();
+        const scheduledEnd = new Date(Date.now() + 2 * 60 * 60 * 1000);
+
+        const updatedJob = await prisma.job.update({
+          where: { id: job.id },
+          data: {
+            technicianId: bestTech.id,
+            status: 'DISPATCHED',
+            scheduledDate: scheduledStart,
+            scheduledStart,
+            scheduledEnd,
+            notes: `${job.notes || ''} [Autonomous AI Dispatch] Assigned to ${bestTech.name} based on 0 active load and zone availability.`.trim(),
+          },
+          include: { customer: true, technician: true },
+        });
+
+        finalStatus = 'DISPATCHED';
+        assignedTechName = bestTech.name;
+        broadcastJobUpdate(updatedJob.id, updatedJob);
+
+        if (bestTech.email) {
+          MailService.sendJobAssignment({
+            to: bestTech.email,
+            technicianName: bestTech.name,
+            customerName: customer.name,
+            customerPhone: customer.phone,
+            serviceAddress: fullAddress,
+            reportedIssue: input.reportedIssue,
+            timeWindow: 'Immediate Dispatch',
+            jobNumber: job.jobNumber,
+            tenantName: tenant.name,
+            isEmergency: input.priority === 'EMERGENCY',
+          }).catch((e: any) => console.error('Failed to notify tech via email:', e));
+        }
+      }
+    } else {
+      // Mode B: Human Dispatcher Triage (RECOMMEND) -> Push to /schedule triage queue
+      broadcastJobUpdate(job.id, job);
+    }
+
     return {
       jobId: job.id,
       jobNumber: job.jobNumber,
-      status: job.status,
+      status: finalStatus,
+      assignedTechnician: assignedTechName,
       customerName: customer.name,
       companyName: tenant.name,
       trackingUrl: `/track/${job.id}`,

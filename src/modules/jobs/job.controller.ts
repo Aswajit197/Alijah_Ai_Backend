@@ -118,6 +118,28 @@ export class JobController {
     }
   }
 
+  static async decline(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const { reason } = req.body || {};
+      const technicianUserId = req.tenantUser?.sub;
+      const result = await JobService.declineJob(req.tenantId!, id, technicianUserId, reason);
+      return successResponse(res, result, result.message);
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
+
+  static async accept(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const result = await JobService.acceptJob(req.tenantId!, id);
+      return successResponse(res, result, 'Work order accepted and added to schedule');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
+
   static async update(req: Request, res: Response) {
     try {
       const id = String(req.params.id);

@@ -24,6 +24,8 @@ router.get('/:id', JobController.getById);
 
 // Write routes
 router.post('/', JobController.create);
+router.post('/:id/decline', JobController.decline);
+router.post('/:id/accept', JobController.accept);
 router.patch('/:id/dispatch', JobController.dispatch);
 router.patch('/:id/status', JobController.updateStatus);
 router.patch('/:id', JobController.update);

@@ -1,6 +1,8 @@
+import crypto from 'crypto';
 import { prisma } from '../../config/database.js';
 import { verifyPassword, hashPassword } from '../../utils/password.js';
 import { signTenantUserToken } from '../../utils/jwt.js';
+import { MailService } from '../../services/mail.service.js';
 
 export class TenantAuthService {
   /**
@@ -138,6 +140,84 @@ export class TenantAuthService {
           permissions,
         },
       },
+    };
+  }
+
+  /**
+   * Generates a password reset token and dispatches a reset link.
+   * Returns the reset link directly in the response so it can be previewed/clicked in dev mode.
+   */
+  static async forgotPassword(data: { email: string; tenantSlug?: string }) {
+    const email = data.email.toLowerCase().trim();
+    if (!email) {
+      throw new Error('Email address is required.');
+    }
+
+    let user;
+    if (data.tenantSlug) {
+      const tenant = await prisma.tenant.findUnique({
+        where: { slug: data.tenantSlug.toLowerCase().trim() },
+      });
+      if (tenant) {
+        user = await prisma.user.findUnique({
+          where: {
+            tenantId_email: {
+              tenantId: tenant.id,
+              email,
+            },
+          },
+          include: { tenant: true, role: true },
+        });
+      }
+    }
+
+    if (!user) {
+      user = await prisma.user.findFirst({
+        where: { email, isActive: true },
+        include: { tenant: true, role: true },
+      });
+    }
+
+    if (!user) {
+      throw new Error(`No active user found with email '${email}'.`);
+    }
+
+    // Generate secure single-use reset token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour validity
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        inviteToken: token,
+        inviteExpiresAt: expiresAt,
+        isInviteAccepted: false,
+      },
+    });
+
+    const frontendBaseUrl =
+      process.env.COMPANY_FRONTEND_URL ||
+      process.env.FRONTEND_URL ||
+      'http://localhost:3000';
+
+    const resetLink = `${frontendBaseUrl}/set-password?token=${token}&type=reset`;
+
+    // Dispatch email
+    await MailService.sendPasswordReset({
+      to: user.email,
+      recipientName: user.name,
+      tenantName: user.tenant.name,
+      resetLink,
+      expiresInHours: 1,
+    });
+
+    return {
+      success: true,
+      email: user.email,
+      recipientName: user.name,
+      tenantName: user.tenant.name,
+      resetLink,
+      expiresAt,
     };
   }
 

@@ -1,0 +1,18 @@
+{
+  "cmwexxk6u0001nrstmjy98yz5": {
+    "dispatchPolicy": "RECOMMEND",
+    "invoiceApprovalThreshold": 5000,
+    "emergencyPageTimeoutMinutes": 10,
+    "autoDispatchEnabled": false,
+    "businessHoursStart": "08:00",
+    "businessHoursEnd": "18:00"
+  },
+  "cmwg840lc0001yeczrxxdxt6r": {
+    "dispatchPolicy": "ALLOW",
+    "invoiceApprovalThreshold": 5000,
+    "emergencyPageTimeoutMinutes": 10,
+    "autoDispatchEnabled": true,
+    "businessHoursStart": "08:00",
+    "businessHoursEnd": "18:00"
+  }
+}
