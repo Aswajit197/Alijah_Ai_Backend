@@ -2,6 +2,12 @@
 
 The **Backend** is an enterprise Node.js/Express + TypeScript REST API providing multi-tenant isolation, dynamic Role-Based Access Control (RBAC), Prisma ORM integration with PostgreSQL, automated voice call sync with Retell AI, technician scheduling, leads management, and customer CRM.
 
+> 📚 **Developer Architecture Guides in `backend/`:**
+> - [**`HOW_TO_RUN_ALL.md`**](file:///d:/PODS/ElijahAi/backend/HOW_TO_RUN_ALL.md) — Complete 4-Service Startup & Run Guide (Docker, Backend, Frontends).
+> - [**`BACKEND_VS_AISERVICE_GUIDE.md`**](file:///d:/PODS/ElijahAi/backend/BACKEND_VS_AISERVICE_GUIDE.md) — Service Boundary, Database Ownership & Internal Contract.
+> - [**`DISPATCH_MANUAL_VS_AUTOMATED_GUIDE.md`**](file:///d:/PODS/ElijahAi/backend/DISPATCH_MANUAL_VS_AUTOMATED_GUIDE.md) — Autonomous vs. Manual Dispatch, Rule 1, Acceptance Timers & Escalations.
+> - [**`MULTI_TENANT_GUIDE.md`**](file:///d:/PODS/ElijahAi/backend/MULTI_TENANT_GUIDE.md) — Multi-Tenancy, Subdomains, Retell Telephony & WebRTC Booking.
+
 ---
 
 ## 1. Quick Specifications
