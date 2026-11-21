@@ -3,6 +3,7 @@ import { JobStatus } from '@prisma/client';
 import { broadcastJobUpdate } from '../../utils/jobEvents.js';
 import { MailService } from '../../services/mail.service.js';
 import { TenantSettingsService } from '../../services/tenantSettings.service.js';
+import { NotificationService } from '../notifications/notification.service.js';
 import jwt from 'jsonwebtoken';
 
 export interface CreateJobInput {
@@ -310,9 +311,33 @@ export class JobService {
     // Broadcast real-time SSE event to live tracking subscribers
     this.broadcastTrackingUpdate(jobId);
 
-    // Notify assigned technician via email
+    // Notify assigned technician via email & in-app notifications
     if (updated.technicianId) {
       this.notifyTechnicianByEmail(updated.id, updated.technicianId, tenantId).catch(() => {});
+      
+      NotificationService.create({
+        tenantId,
+        userId: updated.technicianId,
+        type: 'JOB_DISPATCH',
+        title: `Work Order Assigned: ${updated.jobNumber || 'New Job'}`,
+        message: `${updated.title} — Scheduled for ${updated.customer?.name || 'Customer'} at ${updated.serviceAddress || 'service address'}`,
+        priority: updated.priority === 'EMERGENCY' ? 'URGENT' : 'HIGH',
+        link: `/tech?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
+
+      NotificationService.create({
+        tenantId,
+        userId: null, // broadcast to dispatchers
+        type: 'JOB_DISPATCH',
+        title: `Job ${updated.jobNumber || ''} Dispatched`,
+        message: `Dispatched to ${updated.technician?.name || 'Technician'} (${updated.title})`,
+        priority: updated.priority === 'EMERGENCY' ? 'URGENT' : 'NORMAL',
+        link: `/schedule?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
     }
 
     return updated;
@@ -352,6 +377,25 @@ export class JobService {
 
     // Broadcast real-time SSE event to live tracking subscribers
     this.broadcastTrackingUpdate(jobId);
+
+    // Notify dispatchers of tech progress
+    if (['DISPATCHED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED', 'CANCELLED'].includes(status)) {
+      const actionTitle = status === 'DISPATCHED' 
+        ? `Tech ${updated.technician?.name || 'Technician'} ACCEPTED offer`
+        : `Tech ${updated.technician?.name || 'Technician'} is ${status.replace('_', ' ')}`;
+
+      NotificationService.create({
+        tenantId,
+        userId: null,
+        type: 'TECH_STATUS_CHANGE',
+        title: actionTitle,
+        message: `Status updated for ${updated.jobNumber || 'Job'}: ${updated.title} (${updated.customer?.name || ''})`,
+        priority: 'NORMAL',
+        link: `/schedule?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
+    }
 
     return updated;
   }
@@ -444,7 +488,7 @@ export class JobService {
           technicianName: nextTech.name,
           tenantName: job.tenant.name,
           jobNumber: updated.jobNumber || 'JOB',
-          title: updated.title,
+          title: updated.reportedIssue || updated.title || 'Service Work Order',
           customerName: job.customer?.name || 'Customer',
           customerPhone: job.customer?.phone || '',
           serviceAddress: updated.serviceAddress || job.customer?.address || '',
@@ -458,6 +502,30 @@ export class JobService {
       }
 
       this.broadcastTrackingUpdate(jobId);
+
+      NotificationService.create({
+        tenantId,
+        userId: null,
+        type: 'DISPATCH_TIMEOUT',
+        title: `Job ${updated.jobNumber || ''} Reassigned`,
+        message: `Declined by ${currentTechName}. Automatically re-assigned to ${nextTech.name}${reason ? ` (${reason})` : ''}`,
+        priority: 'HIGH',
+        link: `/schedule?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
+
+      NotificationService.create({
+        tenantId,
+        userId: nextTech.id,
+        type: 'JOB_DISPATCH',
+        title: `Work Order Assigned: ${updated.jobNumber || 'New Job'}`,
+        message: `${updated.title} — Assigned by Elijah AI Auto-Dispatch`,
+        priority: updated.priority === 'EMERGENCY' ? 'URGENT' : 'HIGH',
+        link: `/tech?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
 
       return {
         reassigned: true,
@@ -490,6 +558,18 @@ export class JobService {
       });
 
       this.broadcastTrackingUpdate(jobId);
+
+      NotificationService.create({
+        tenantId,
+        userId: null,
+        type: 'ESCALATION_REQUIRED',
+        title: `⚠️ Dispatch Escalation: ${updated.jobNumber || 'Work Order'} Unassigned`,
+        message: `Declined by ${currentTechName}. No other active technicians available — escalated to Dispatcher Triage Queue.`,
+        priority: 'URGENT',
+        link: `/schedule?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
 
       return {
         reassigned: false,
@@ -538,6 +618,25 @@ export class JobService {
 
     // Broadcast real-time SSE event to live tracking subscribers
     this.broadcastTrackingUpdate(jobId);
+
+    // Notify dispatchers of tech progress
+    if (['DISPATCHED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED', 'CANCELLED'].includes(status)) {
+      const actionTitle = status === 'DISPATCHED' 
+        ? `Tech ${updated.technician?.name || 'Technician'} ACCEPTED offer`
+        : `Tech ${updated.technician?.name || 'Technician'} is ${status.replace('_', ' ')}`;
+
+      NotificationService.create({
+        tenantId,
+        userId: null,
+        type: 'TECH_STATUS_CHANGE',
+        title: actionTitle,
+        message: `Status updated for ${updated.jobNumber || 'Job'}: ${updated.title} (${updated.customer?.name || ''})`,
+        priority: 'NORMAL',
+        link: `/schedule?jobId=${updated.id}`,
+        entityType: 'JOB',
+        entityId: updated.id,
+      }).catch(() => {});
+    }
 
     // Notify assigned technician via email if newly assigned or changed
     if (updated.technicianId && updated.technicianId !== job.technicianId) {
@@ -986,24 +1085,64 @@ export class JobService {
         assignedTechName = bestTech.name;
         broadcastJobUpdate(updatedJob.id, updatedJob);
 
+        NotificationService.create({
+          tenantId,
+          userId: bestTech.id,
+          type: 'JOB_DISPATCH',
+          title: `Work Order Assigned: ${job.jobNumber}`,
+          message: `${input.reportedIssue || job.title} — ${customer.name} at ${fullAddress}`,
+          priority: input.priority === 'EMERGENCY' ? 'URGENT' : 'HIGH',
+          link: `/tech?jobId=${job.id}`,
+          entityType: 'JOB',
+          entityId: job.id,
+        }).catch(() => {});
+
+        NotificationService.create({
+          tenantId,
+          userId: null,
+          type: input.priority === 'EMERGENCY' ? 'EMERGENCY_LEAD' : 'JOB_DISPATCH',
+          title: input.priority === 'EMERGENCY' ? `🚨 Emergency Auto-Dispatched: ${job.jobNumber}` : `Job ${job.jobNumber} Auto-Dispatched`,
+          message: `Assigned to ${bestTech.name} (${customer.name}: ${input.reportedIssue || job.title})`,
+          priority: input.priority === 'EMERGENCY' ? 'URGENT' : 'NORMAL',
+          link: `/schedule?jobId=${job.id}`,
+          entityType: 'JOB',
+          entityId: job.id,
+        }).catch(() => {});
+
         if (bestTech.email) {
+          const windowStr = input.preferredWindow || 'Immediate Dispatch (First Available)';
           MailService.sendJobAssignment({
             to: bestTech.email,
             technicianName: bestTech.name,
             customerName: customer.name,
             customerPhone: customer.phone,
             serviceAddress: fullAddress,
+            title: input.reportedIssue || job.title,
             reportedIssue: input.reportedIssue,
-            timeWindow: 'Immediate Dispatch',
+            scheduledWindow: windowStr,
+            timeWindow: windowStr,
             jobNumber: job.jobNumber,
             tenantName: tenant.name,
             isEmergency: input.priority === 'EMERGENCY',
+            priority: input.priority || 'NORMAL',
           }).catch((e: any) => console.error('Failed to notify tech via email:', e));
         }
       }
     } else {
       // Mode B: Human Dispatcher Triage (RECOMMEND) -> Push to /schedule triage queue
       broadcastJobUpdate(job.id, job);
+
+      NotificationService.create({
+        tenantId,
+        userId: null,
+        type: input.priority === 'EMERGENCY' ? 'EMERGENCY_LEAD' : 'SYSTEM',
+        title: input.priority === 'EMERGENCY' ? `🚨 Emergency Request: ${job.jobNumber}` : `New Service Request: ${job.jobNumber}`,
+        message: `${customer.name}: ${input.reportedIssue || job.title} — In Triage Queue`,
+        priority: input.priority === 'EMERGENCY' ? 'URGENT' : 'NORMAL',
+        link: `/schedule?jobId=${job.id}`,
+        entityType: 'JOB',
+        entityId: job.id,
+      }).catch(() => {});
     }
 
     return {

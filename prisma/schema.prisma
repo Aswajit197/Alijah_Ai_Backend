@@ -40,6 +40,8 @@ model Tenant {
   customers    Customer[]
   equipments   Equipment[]
   jobs         Job[]
+  notifications Notification[]
+  superAdminNotifications SuperAdminNotification[]
   
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -123,6 +125,7 @@ model User {
   tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   role               Role      @relation(fields: [roleId], references: [id], onDelete: Restrict)
   jobsAssigned       Job[]     @relation("TechnicianJobs")
+  notifications      Notification[] @relation("UserNotifications")
 
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
@@ -234,5 +237,87 @@ enum JobStatus {
   ON_SITE
   COMPLETED
   CANCELLED
+}
+
+// =========================================================================
+// 6. Notifications & Operational Alerts
+// =========================================================================
+enum NotificationType {
+  EMERGENCY_LEAD
+  JOB_DISPATCH
+  TECH_STATUS_CHANGE
+  DISPATCH_TIMEOUT
+  ESCALATION_REQUIRED
+  COMMUNICATION
+  SYSTEM
+}
+
+enum NotificationPriority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+model Notification {
+  id          String               @id @default(cuid())
+  tenantId    String
+  userId      String?              // null = broadcast to all tenant staff (dispatchers / owner)
+  type        NotificationType     @default(SYSTEM)
+  title       String
+  message     String
+  priority    NotificationPriority @default(NORMAL)
+  link        String?              // e.g. "/schedule?jobId=..." or "/leads"
+  entityType  String?              // "JOB" | "LEAD" | "CALL"
+  entityId    String?              // e.g. jobId or leadId
+  metadata    Json?
+  isRead      Boolean              @default(false)
+  readAt      DateTime?
+  createdAt   DateTime             @default(now())
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User?                @relation("UserNotifications", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, userId, isRead])
+  @@index([tenantId, createdAt])
+  @@map("notifications")
+}
+
+// =========================================================================
+// 7. Platform Super Admin Notifications & System Alerts
+// =========================================================================
+enum SuperAdminNotificationType {
+  TENANT_CREATED
+  INVITE_ACCEPTED
+  INVITE_RESENT
+  TENANT_STATUS_CHANGED
+  USAGE_QUOTA_ALERT
+  SYSTEM_ALERT
+}
+
+enum SuperAdminAlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model SuperAdminNotification {
+  id          String                     @id @default(cuid())
+  type        SuperAdminNotificationType @default(SYSTEM_ALERT)
+  title       String
+  message     String
+  severity    SuperAdminAlertSeverity    @default(INFO)
+  tenantId    String?                    // Optional link to company
+  tenantSlug  String?
+  link        String?                    // Direct link (e.g., "/tenants")
+  metadata    Json?
+  isRead      Boolean                    @default(false)
+  readAt      DateTime?
+  createdAt   DateTime                   @default(now())
+
+  tenant      Tenant?                    @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([isRead, createdAt])
+  @@map("super_admin_notifications")
 }
 

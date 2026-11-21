@@ -3,6 +3,7 @@ import { prisma } from '../../config/database.js';
 import { verifyPassword, hashPassword } from '../../utils/password.js';
 import { signTenantUserToken } from '../../utils/jwt.js';
 import { MailService } from '../../services/mail.service.js';
+import { SuperAdminService } from '../super-admin/superAdmin.service.js';
 
 export class TenantAuthService {
   /**
@@ -108,6 +109,19 @@ export class TenantAuthService {
         },
       },
     });
+
+    // Notify SuperAdmin that tenant owner completed setup
+    if (updatedUser.role?.slug === 'owner') {
+      SuperAdminService.createNotification({
+        type: 'INVITE_ACCEPTED',
+        severity: 'INFO',
+        title: `Owner Account Activated: ${updatedUser.name}`,
+        message: `${updatedUser.name} (${updatedUser.email}) completed setup for '${updatedUser.tenant.name}'.`,
+        tenantId: updatedUser.tenantId,
+        tenantSlug: updatedUser.tenant.slug,
+        link: '/tenants',
+      }).catch(() => {});
+    }
 
     // Auto-login upon setting password
     const token = signTenantUserToken({

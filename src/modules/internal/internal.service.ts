@@ -449,7 +449,7 @@ export class InternalService {
         technicianName: technician.name,
         tenantName: 'Vanguard Electric & Power',
         jobNumber: updatedJob.jobNumber || 'JOB-ACTIVE',
-        title: updatedJob.title || 'Service Visit',
+        title: updatedJob.reportedIssue || updatedJob.title || 'Service Visit',
         customerName,
         customerPhone: updatedJob.customer?.phone || '',
         serviceAddress: address,

@@ -179,4 +179,45 @@ export class SuperAdminController {
       return errorResponse(res, err.message, 400);
     }
   }
+
+  // --- SuperAdmin Notifications ---
+  static async listNotifications(req: Request, res: Response) {
+    try {
+      const unreadOnly = req.query.unreadOnly === 'true';
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 30;
+      const data = await SuperAdminService.listNotifications({ unreadOnly, limit });
+      return successResponse(res, data, 'SuperAdmin notifications retrieved successfully');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 500);
+    }
+  }
+
+  static async markNotificationRead(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      const updated = await SuperAdminService.markNotificationRead(id);
+      return successResponse(res, updated, 'Notification marked as read');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
+
+  static async markAllNotificationsRead(req: Request, res: Response) {
+    try {
+      const result = await SuperAdminService.markAllNotificationsRead();
+      return successResponse(res, { count: result.count }, 'All notifications marked as read');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 500);
+    }
+  }
+
+  static async deleteNotification(req: Request, res: Response) {
+    try {
+      const id = String(req.params.id);
+      await SuperAdminService.deleteNotification(id);
+      return successResponse(res, { id }, 'Notification deleted');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
+    }
+  }
 }

@@ -1,8 +1,20 @@
 import crypto from 'crypto';
 import { prisma } from '../../config/database.js';
+import { SuperAdminNotificationType, SuperAdminAlertSeverity } from '@prisma/client';
 import { hashPassword, verifyPassword } from '../../utils/password.js';
 import { signSuperAdminToken } from '../../utils/jwt.js';
 import { MailService } from '../../services/mail.service.js';
+
+export interface CreateSuperAdminNotificationInput {
+  type: SuperAdminNotificationType;
+  title: string;
+  message: string;
+  severity?: SuperAdminAlertSeverity;
+  tenantId?: string | null;
+  tenantSlug?: string | null;
+  link?: string | null;
+  metadata?: Record<string, any>;
+}
 
 export class SuperAdminService {
   static async login(email: string, password: string) {
@@ -152,6 +164,17 @@ export class SuperAdminService {
       expiresInHours: 24,
     });
 
+    // Notify SuperAdmin platform of new company registration
+    SuperAdminService.createNotification({
+      type: 'TENANT_CREATED',
+      severity: 'INFO',
+      title: `New Company Onboarded: ${data.name}`,
+      message: `${data.ownerName} (${ownerEmail}) provisioned on ${data.plan || 'GROWTH'} plan with code '${slug}'.`,
+      tenantId: result.tenant.id,
+      tenantSlug: slug,
+      link: '/tenants',
+    }).catch(() => {});
+
     return {
       ...result,
       inviteToken,
@@ -207,6 +230,16 @@ export class SuperAdminService {
       expiresInHours: 24,
     });
 
+    SuperAdminService.createNotification({
+      type: 'INVITE_RESENT',
+      severity: 'INFO',
+      title: `Setup Link Resent: ${tenant.name}`,
+      message: `Fresh 24h onboarding link delivered to ${ownerUser.name} (${ownerUser.email}).`,
+      tenantId: tenant.id,
+      tenantSlug: tenant.slug,
+      link: '/tenants',
+    }).catch(() => {});
+
     return {
       success: true,
       ownerEmail: ownerUser.email,
@@ -216,10 +249,22 @@ export class SuperAdminService {
   }
 
   static async updateTenantStatus(id: string, status: 'ACTIVE' | 'SUSPENDED' | 'TRIAL' | 'ARCHIVED') {
-    return prisma.tenant.update({
+    const updated = await prisma.tenant.update({
       where: { id },
       data: { status },
     });
+
+    SuperAdminService.createNotification({
+      type: 'TENANT_STATUS_CHANGED',
+      severity: status === 'SUSPENDED' ? 'CRITICAL' : 'WARNING',
+      title: `Tenant Status Updated: ${updated.name}`,
+      message: `Status transitioned to ${status}. Company access is now ${status === 'SUSPENDED' ? 'blocked' : 'active'}.`,
+      tenantId: updated.id,
+      tenantSlug: updated.slug,
+      link: '/tenants',
+    }).catch(() => {});
+
+    return updated;
   }
 
   // --- Dynamic Roles Management (SuperAdmin Only) ---
@@ -414,6 +459,71 @@ export class SuperAdminService {
       await tx.rolePermission.deleteMany({ where: { permissionId: id } });
       await tx.permission.delete({ where: { id } });
       return { id, deleted: true, detachedFromRoles: perm._count.roles };
+    });
+  }
+
+  // --- SuperAdmin Notifications & Platform Alerts ---
+  static async createNotification(data: CreateSuperAdminNotificationInput) {
+    try {
+      return await prisma.superAdminNotification.create({
+        data: {
+          type: data.type,
+          title: data.title,
+          message: data.message,
+          severity: data.severity || 'INFO',
+          tenantId: data.tenantId || null,
+          tenantSlug: data.tenantSlug || null,
+          link: data.link || '/tenants',
+          metadata: data.metadata || undefined,
+        },
+      });
+    } catch (err: any) {
+      console.error('Failed to create superadmin notification:', err.message);
+      return null;
+    }
+  }
+
+  static async listNotifications(options: { unreadOnly?: boolean; limit?: number } = {}) {
+    const limit = options.limit || 30;
+    const where: any = {};
+    if (options.unreadOnly) {
+      where.isRead = false;
+    }
+
+    const [notifications, unreadCount] = await Promise.all([
+      prisma.superAdminNotification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      prisma.superAdminNotification.count({
+        where: { isRead: false },
+      }),
+    ]);
+
+    return {
+      notifications,
+      unreadCount,
+    };
+  }
+
+  static async markNotificationRead(id: string) {
+    return prisma.superAdminNotification.update({
+      where: { id },
+      data: { isRead: true, readAt: new Date() },
+    });
+  }
+
+  static async markAllNotificationsRead() {
+    return prisma.superAdminNotification.updateMany({
+      where: { isRead: false },
+      data: { isRead: true, readAt: new Date() },
+    });
+  }
+
+  static async deleteNotification(id: string) {
+    return prisma.superAdminNotification.delete({
+      where: { id },
     });
   }
 }

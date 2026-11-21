@@ -22,13 +22,16 @@ export interface SendJobAssignmentParams {
   technicianName: string;
   tenantName: string;
   jobNumber: string;
-  title: string;
+  title?: string;
+  reportedIssue?: string;
   customerName: string;
   customerPhone: string;
   serviceAddress: string;
   gateCode?: string | null;
-  scheduledWindow: string;
+  scheduledWindow?: string;
+  timeWindow?: string;
   priority?: string;
+  isEmergency?: boolean;
   portalUrl?: string;
 }
 
@@ -148,16 +151,17 @@ export class MailService {
       technicianName,
       tenantName,
       jobNumber,
-      title,
       customerName,
       customerPhone,
       serviceAddress,
       gateCode,
-      scheduledWindow,
-      priority = 'NORMAL',
       portalUrl = `${process.env.COMPANY_APP_URL || 'http://localhost:3000'}/tech`,
     } = params;
     const transporter = this.getTransporter();
+
+    const finalTitle = params.title || params.reportedIssue || 'Service Work Order';
+    const finalWindow = params.scheduledWindow || params.timeWindow || 'Immediate Dispatch (First Available)';
+    const priority = params.priority || (params.isEmergency ? 'EMERGENCY' : 'NORMAL');
 
     const isEmergency = priority === 'EMERGENCY';
     const subject = isEmergency
@@ -190,13 +194,13 @@ export class MailService {
           <div style="background-color: #151F36; border: 1px solid #1E2C4A; border-radius: 14px; padding: 20px; margin-bottom: 24px;">
             <div style="border-bottom: 1px solid #1E2C4A; padding-bottom: 12px; margin-bottom: 14px;">
               <span style="font-size: 11px; text-transform: uppercase; color: #64748B; font-weight: 700;">Issue / Task</span>
-              <p style="font-size: 16px; font-weight: 700; color: #FFFFFF; margin: 4px 0 0 0;">${title}</p>
+              <p style="font-size: 16px; font-weight: 700; color: #FFFFFF; margin: 4px 0 0 0;">${finalTitle}</p>
             </div>
 
             <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
               <tr>
                 <td style="padding: 6px 0; color: #64748B; width: 35%;">Arrival Window:</td>
-                <td style="padding: 6px 0; color: #38BDF8; font-weight: 600;">${scheduledWindow}</td>
+                <td style="padding: 6px 0; color: #38BDF8; font-weight: 600;">${finalWindow}</td>
               </tr>
               <tr>
                 <td style="padding: 6px 0; color: #64748B;">Customer:</td>
@@ -254,8 +258,8 @@ export class MailService {
     console.log(`To:          ${technicianName} <${to}>`);
     console.log(`Company:     ${tenantName}`);
     console.log(`Work Order:  ${jobNumber} (${priority})`);
-    console.log(`Issue:       ${title}`);
-    console.log(`Window:      ${scheduledWindow}`);
+    console.log(`Issue:       ${finalTitle}`);
+    console.log(`Window:      ${finalWindow}`);
     console.log(`Customer:    ${customerName} (${customerPhone})`);
     console.log(`Location:    ${serviceAddress}`);
     if (gateCode) console.log(`Gate Code:   ${gateCode}`);

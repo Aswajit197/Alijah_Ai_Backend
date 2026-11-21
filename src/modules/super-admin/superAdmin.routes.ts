@@ -27,4 +27,10 @@ router.post('/roles', SuperAdminController.createRole);
 router.put('/roles/:id', SuperAdminController.updateRole);
 router.delete('/roles/:id', SuperAdminController.deleteRole);
 
+// SuperAdmin Notifications & Platform Alerts
+router.get('/notifications', SuperAdminController.listNotifications);
+router.patch('/notifications/read-all', SuperAdminController.markAllNotificationsRead);
+router.patch('/notifications/:id/read', SuperAdminController.markNotificationRead);
+router.delete('/notifications/:id', SuperAdminController.deleteNotification);
+
 export const superAdminRoutes = router;
