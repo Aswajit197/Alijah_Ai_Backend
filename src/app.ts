@@ -9,6 +9,7 @@ import { customerRoutes } from './modules/customers/customer.routes.js';
 import { jobRoutes } from './modules/jobs/job.routes.js';
 import { notificationRoutes } from './modules/notifications/notification.routes.js';
 import { internalRoutes } from './modules/internal/internal.routes.js';
+import { operationsRoutes } from './modules/operations/operations.routes.js';
 import { errorResponse } from './utils/response.js';
 
 export const app = express();
@@ -47,6 +48,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/jobs', jobRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
+app.use('/api/v1', operationsRoutes);
 
 // Internal Microservice API Routes (for Retell voice-service & Temporal workflow-service)
 app.use('/internal/v1', internalRoutes);

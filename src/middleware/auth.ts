@@ -14,12 +14,18 @@ declare global {
 }
 
 export function authenticate(req: Request, res: Response, next: NextFunction) {
+  let token: string | undefined;
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  } else if (req.query && typeof req.query.token === 'string') {
+    token = req.query.token;
+  }
+
+  if (!token) {
     return errorResponse(res, 'Authentication token missing or invalid format', 401);
   }
 
-  const token = authHeader.split(' ')[1];
   try {
     const payload = verifyToken(token);
     if (payload.type === 'SUPER_ADMIN') {

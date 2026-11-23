@@ -42,6 +42,11 @@ model Tenant {
   jobs         Job[]
   notifications Notification[]
   superAdminNotifications SuperAdminNotification[]
+  serviceAreas ServiceArea[]
+  serviceAreaZipCodes ServiceAreaZipCode[]
+  callerAddresses CallerAddress[]
+  followUpSettings FollowUpSettings?
+  technicianCheckIns TechnicianCheckIn[]
   
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -319,5 +324,91 @@ model SuperAdminNotification {
 
   @@index([isRead, createdAt])
   @@map("super_admin_notifications")
+}
+
+// =========================================================================
+// 8. Field Operations & Dispatch Routing (Merged from operations-service)
+// =========================================================================
+model ServiceArea {
+  id         String               @id @default(uuid())
+  tenantId   String
+  name       String
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  tenant     Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  zipCodes   ServiceAreaZipCode[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("service_areas")
+}
+
+model ServiceAreaZipCode {
+  id            String      @id @default(uuid())
+  tenantId      String
+  serviceAreaId String
+  zipCode       String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  serviceArea   ServiceArea @relation(fields: [serviceAreaId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, zipCode])
+  @@index([serviceAreaId])
+  @@map("service_area_zip_codes")
+}
+
+model CallerAddress {
+  id               String    @id @default(uuid())
+  tenantId         String
+  phoneNumber      String
+  label            String?
+  street           String
+  city             String
+  state            String
+  zipCode          String
+  normalizedStreet String
+  lastUsedAt       DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, phoneNumber, normalizedStreet, zipCode])
+  @@index([tenantId, phoneNumber, lastUsedAt(sort: Desc)])
+  @@map("caller_addresses")
+}
+
+model FollowUpSettings {
+  id                             String    @id @default(uuid())
+  tenantId                       String    @unique
+  feedbackCallDelayMinutes       Int       @default(300)
+  isTechnicianCheckInEnabled     Boolean   @default(false)
+  technicianCheckInDelayMinutes  Int       @default(60)
+  recipes                        Json?
+  updatedBy                      String    @default("system")
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
+  tenant                         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("follow_up_settings")
+}
+
+model TechnicianCheckIn {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  serviceRequestId       String
+  retellCallId           String?
+  progress               String
+  challenges             String?
+  isHelpNeeded           Boolean   @default(false)
+  expectedFinishMinutes  Int?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, retellCallId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, serviceRequestId])
+  @@map("technician_check_ins")
 }
 

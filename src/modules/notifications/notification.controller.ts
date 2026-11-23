@@ -4,6 +4,59 @@ import { successResponse, errorResponse } from '../../utils/response.js';
 
 export class NotificationController {
   /**
+   * GET /api/v1/notifications/stream
+   * Real-time Server-Sent Events (SSE) stream for instant notifications without polling
+   */
+  static async stream(req: Request, res: Response) {
+    try {
+      const tenantId = req.tenantId || req.tenantUser?.tenantId;
+      if (!tenantId) {
+        return errorResponse(res, 'Tenant context missing', 400);
+      }
+
+      const userId = req.tenantUser?.sub;
+      const clientId = `sse_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+      // 1. Set SSE Headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+
+      // 2. Register client connection
+      NotificationService.addClient(clientId, tenantId, userId, res);
+
+      // 3. Send initial connected event with current unread count
+      const initial = await NotificationService.list(tenantId, userId, { limit: 1 });
+      res.write(`event: connected\ndata: ${JSON.stringify({ clientId, unreadCount: initial.unreadCount })}\n\n`);
+
+      // 4. Send keep-alive heartbeat comment every 25 seconds to keep proxies and load balancers open
+      const keepAliveTimer = setInterval(() => {
+        try {
+          res.write(': keepalive\n\n');
+        } catch {
+          clearInterval(keepAliveTimer);
+          NotificationService.removeClient(clientId);
+        }
+      }, 25000);
+
+      // 5. Cleanup on connection close
+      req.on('close', () => {
+        clearInterval(keepAliveTimer);
+        NotificationService.removeClient(clientId);
+      });
+    } catch (err: any) {
+      console.error('SSE Stream error:', err);
+      if (!res.headersSent) {
+        return errorResponse(res, err.message || 'SSE stream failed', 500);
+      }
+      res.end();
+    }
+  }
+
+  /**
    * GET /api/v1/notifications
    * List recent notifications with unread count
    */

@@ -384,4 +384,138 @@ export class InternalController {
   static async health(_req: Request, res: Response) {
     return res.json({ status: 'ok', service: 'core-service (backend native)' });
   }
+
+  // =========================================================================
+  // Caller Addresses & Disambiguation (Merged from operations-service)
+  // =========================================================================
+
+  /**
+   * POST /internal/v1/caller-addresses/lookup
+   */
+  static async lookupCallerAddresses(req: InternalRequest, res: Response) {
+    try {
+      const { phoneNumber, answer } = req.body || {};
+      if (!phoneNumber) {
+        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'phoneNumber is required' } });
+      }
+      const result = await InternalService.lookupCallerAddresses(req.tenantId!, phoneNumber, answer);
+      return res.json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  /**
+   * POST /internal/v1/caller-addresses
+   */
+  static async saveCallerAddress(req: InternalRequest, res: Response) {
+    try {
+      const { phoneNumber, label, address } = req.body || {};
+      if (!phoneNumber || !address) {
+        return res.status(400).json({ error: { code: 'INVALID_INPUT', message: 'phoneNumber and address are required' } });
+      }
+      const result = await InternalService.saveCallerAddress(req.tenantId!, phoneNumber, address, label);
+      return res.status(201).json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  // =========================================================================
+  // Follow-Up Timing Settings (Merged from operations-service)
+  // =========================================================================
+
+  /**
+   * GET /internal/v1/follow-up-settings or /api/v1/follow-up-settings
+   */
+  static async getFollowUpSettings(req: InternalRequest, res: Response) {
+    try {
+      const result = await InternalService.getFollowUpSettings(req.tenantId!);
+      return res.json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  /**
+   * PUT /api/v1/follow-up-settings
+   */
+  static async updateFollowUpSettings(req: InternalRequest, res: Response) {
+    try {
+      const updatedBy = (req as any).user?.name || 'office_manager';
+      const result = await InternalService.updateFollowUpSettings(req.tenantId!, req.body, updatedBy);
+      return res.json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  // =========================================================================
+  // Technician Mid-Job Check-Ins (Merged from operations-service)
+  // =========================================================================
+
+  /**
+   * POST /internal/v1/technician-check-ins
+   */
+  static async recordTechnicianCheckIn(req: InternalRequest, res: Response) {
+    try {
+      const result = await InternalService.recordTechnicianCheckIn(req.tenantId!, req.body);
+      return res.status(201).json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  /**
+   * GET /api/v1/technician-check-ins
+   */
+  static async listTechnicianCheckIns(req: InternalRequest, res: Response) {
+    try {
+      const serviceRequestId = req.query.serviceRequestId ? String(req.query.serviceRequestId) : undefined;
+      const result = await InternalService.listTechnicianCheckIns(req.tenantId!, serviceRequestId);
+      return res.json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  // =========================================================================
+  // Service Areas CRUD (Merged from operations-service)
+  // =========================================================================
+
+  /**
+   * GET /api/v1/service-areas
+   */
+  static async listServiceAreas(req: InternalRequest, res: Response) {
+    try {
+      const result = await InternalService.listServiceAreas(req.tenantId!);
+      return res.json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  /**
+   * POST /api/v1/service-areas
+   */
+  static async createServiceArea(req: InternalRequest, res: Response) {
+    try {
+      const result = await InternalService.createServiceArea(req.tenantId!, req.body);
+      return res.status(201).json({ data: result });
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
+
+  /**
+   * DELETE /api/v1/service-areas/:serviceAreaId
+   */
+  static async deleteServiceArea(req: InternalRequest, res: Response) {
+    try {
+      await InternalService.deleteServiceArea(req.tenantId!, req.params.serviceAreaId);
+      return res.status(204).send();
+    } catch (error: any) {
+      return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });
+    }
+  }
 }

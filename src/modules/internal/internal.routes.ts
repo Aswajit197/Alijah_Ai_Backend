@@ -20,6 +20,23 @@ internalRoutes.use(resolveInternalTenant);
 internalRoutes.get('/service-areas/check', InternalController.checkServiceArea);
 internalRoutes.get('/availability', InternalController.getAvailability);
 
+// Caller Addresses & Disambiguation (from operations-service)
+internalRoutes.post('/caller-addresses/lookup', InternalController.lookupCallerAddresses);
+internalRoutes.post('/caller-addresses', InternalController.saveCallerAddress);
+
+// Follow-Up Timing Settings (from operations-service)
+internalRoutes.get('/follow-up-settings', InternalController.getFollowUpSettings);
+internalRoutes.put('/follow-up-settings', InternalController.updateFollowUpSettings);
+
+// Technician Mid-Job Check-Ins (from operations-service)
+internalRoutes.post('/technician-check-ins', InternalController.recordTechnicianCheckIn);
+internalRoutes.get('/technician-check-ins', InternalController.listTechnicianCheckIns);
+
+// Service Areas Management
+internalRoutes.get('/service-areas', InternalController.listServiceAreas);
+internalRoutes.post('/service-areas', InternalController.createServiceArea);
+internalRoutes.delete('/service-areas/:serviceAreaId', InternalController.deleteServiceArea);
+
 // Customers
 internalRoutes.get('/customers/by-phone/:phone', InternalController.getCustomerByPhone);
 internalRoutes.get('/customers/:id', InternalController.getCustomerById);

@@ -8,6 +8,7 @@ const router = Router();
 // Protect all notification routes with tenant authentication
 router.use(authenticate, requireTenantUser, enforceTenantIsolation);
 
+router.get('/stream', NotificationController.stream);
 router.get('/', NotificationController.list);
 router.patch('/read-all', NotificationController.markAllRead);
 router.patch('/:id/read', NotificationController.markRead);

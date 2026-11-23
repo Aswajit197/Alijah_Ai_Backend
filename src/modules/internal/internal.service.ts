@@ -3,10 +3,14 @@ import { JobStatus } from '@prisma/client';
 import { broadcastJobUpdate } from '../../utils/jobEvents.js';
 import { MailService } from '../../services/mail.service.js';
 import { toUuid, fromUuid, DEFAULT_TENANT_UUID } from './id-mapper.js';
+import { buildAddressChoice, ChoiceAddress } from './address-choice.js';
+import { NotificationService } from '../notifications/notification.service.js';
 
 export interface ServiceAreaResult {
   zip: string;
+  isConfigured: boolean;
   isServed: boolean;
+  areaName: string | null;
   zone: string | null;
   locationName: string | null;
 }
@@ -63,35 +67,70 @@ export class InternalService {
   /**
    * Checks whether the given 5-digit ZIP code is within the tenant's service coverage.
    */
-  static async checkServiceArea(_tenantId: string, zipCode: string): Promise<ServiceAreaResult> {
-    const num = parseInt(zipCode, 10);
+  static async checkServiceArea(tenantId: string, zipCode: string): Promise<ServiceAreaResult> {
+    const rawZip = String(zipCode || '').trim();
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+
+    try {
+      // Check if company has custom service areas configured
+      const configuredCount = await (prisma as any).serviceArea.count({ where: { tenantId: cleanTenantId } });
+      if (configuredCount > 0) {
+        const match = await (prisma as any).serviceAreaZipCode.findFirst({
+          where: { tenantId: cleanTenantId, zipCode: rawZip },
+          include: { serviceArea: true },
+        });
+        if (match) {
+          return {
+            zip: rawZip,
+            isConfigured: true,
+            isServed: true,
+            areaName: match.serviceArea?.name || 'Primary Area',
+            zone: match.serviceArea?.name || 'primary',
+            locationName: match.serviceArea?.name || 'Primary Area',
+          };
+        } else {
+          return {
+            zip: rawZip,
+            isConfigured: true,
+            isServed: false,
+            areaName: null,
+            zone: null,
+            locationName: null,
+          };
+        }
+      }
+    } catch {
+      // Table fallback if schema migration pending
+    }
+
+    const num = parseInt(rawZip, 10);
     if (isNaN(num)) {
-      return { zip: zipCode, isServed: false, zone: null, locationName: null };
+      return { zip: rawZip, isConfigured: false, isServed: false, areaName: null, zone: null, locationName: null };
     }
 
     // Phoenix Metro (85001 - 85099)
     if (num >= 85001 && num <= 85099) {
-      return { zip: zipCode, isServed: true, zone: 'phoenix', locationName: 'Phoenix (Central / Downtown)' };
+      return { zip: rawZip, isConfigured: false, isServed: true, areaName: 'Phoenix', zone: 'phoenix', locationName: 'Phoenix (Central / Downtown)' };
     }
     // Mesa / East Valley (85201 - 85215)
     if (num >= 85201 && num <= 85215) {
-      return { zip: zipCode, isServed: true, zone: 'mesa', locationName: 'Mesa / East Valley' };
+      return { zip: rawZip, isConfigured: false, isServed: true, areaName: 'Mesa', zone: 'mesa', locationName: 'Mesa / East Valley' };
     }
     // Scottsdale (85250 - 85268)
     if (num >= 85250 && num <= 85268) {
-      return { zip: zipCode, isServed: true, zone: 'scottsdale', locationName: 'Scottsdale / Paradise Valley' };
+      return { zip: rawZip, isConfigured: false, isServed: true, areaName: 'Scottsdale', zone: 'scottsdale', locationName: 'Scottsdale / Paradise Valley' };
     }
     // Henderson, NV (89002 - 89074)
     if (num >= 89002 && num <= 89074) {
-      return { zip: zipCode, isServed: true, zone: 'henderson', locationName: 'Henderson, NV' };
+      return { zip: rawZip, isConfigured: false, isServed: true, areaName: 'Henderson, NV', zone: 'henderson', locationName: 'Henderson, NV' };
     }
     // Las Vegas, NV (89101 - 89199)
     if (num >= 89101 && num <= 89199) {
-      return { zip: zipCode, isServed: true, zone: 'las_vegas', locationName: 'Las Vegas, NV' };
+      return { zip: rawZip, isConfigured: false, isServed: true, areaName: 'Las Vegas, NV', zone: 'las_vegas', locationName: 'Las Vegas, NV' };
     }
 
     // Default: outside covered territory
-    return { zip: zipCode, isServed: false, zone: null, locationName: null };
+    return { zip: rawZip, isConfigured: false, isServed: false, areaName: null, zone: null, locationName: null };
   }
 
   /**
@@ -541,5 +580,338 @@ export class InternalService {
         'Any repair quote is presented upfront for your approval before work begins.',
       ],
     };
+  }
+
+  // =========================================================================
+  // Caller Addresses & Disambiguation (Merged from operations-service)
+  // =========================================================================
+
+  /**
+   * Looks up saved addresses for a caller phone number and builds the address question/choice.
+   */
+  static async lookupCallerAddresses(tenantId: string, phoneNumber: string, answer?: string) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const cleanPhone = phoneNumber.replace(/[^0-9+]/g, '');
+
+    const saved = await (prisma as any).callerAddress.findMany({
+      where: { tenantId: cleanTenantId, phoneNumber: cleanPhone },
+      orderBy: { lastUsedAt: 'desc' },
+      take: 20,
+    });
+
+    const addresses = saved.map((row: any) => ({
+      id: toUuid(row.id),
+      label: row.label ?? null,
+      address: {
+        street: row.street,
+        city: row.city,
+        state: row.state,
+        zip: row.zipCode,
+      },
+      lastUsedAt: row.lastUsedAt.toISOString(),
+    }));
+
+    const choiceInput: ChoiceAddress[] = saved.map((row: any) => ({
+      id: toUuid(row.id),
+      label: row.label ?? null,
+      street: row.street,
+      city: row.city,
+      state: row.state,
+      zip: row.zipCode,
+    }));
+
+    const choice = buildAddressChoice(choiceInput, answer);
+
+    return {
+      addresses,
+      choice,
+    };
+  }
+
+  /**
+   * Saves or reuses an address for a caller phone number.
+   */
+  static async saveCallerAddress(
+    tenantId: string,
+    phoneNumber: string,
+    address: { street: string; city: string; state: string; zip: string },
+    label?: string
+  ) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const cleanPhone = phoneNumber.replace(/[^0-9+]/g, '');
+    const normalizedStreet = address.street.toLowerCase().replace(/[^a-zA-Z0-9]/g, '');
+
+    let existing = await (prisma as any).callerAddress.findFirst({
+      where: {
+        tenantId: cleanTenantId,
+        phoneNumber: cleanPhone,
+        normalizedStreet,
+        zipCode: address.zip,
+      },
+    });
+
+    let savedRow;
+    if (existing) {
+      savedRow = await (prisma as any).callerAddress.update({
+        where: { id: existing.id },
+        data: {
+          label: label !== undefined ? label : existing.label,
+          street: address.street,
+          city: address.city,
+          state: address.state,
+          lastUsedAt: new Date(),
+        },
+      });
+    } else {
+      savedRow = await (prisma as any).callerAddress.create({
+        data: {
+          tenantId: cleanTenantId,
+          phoneNumber: cleanPhone,
+          label: label || null,
+          street: address.street,
+          city: address.city,
+          state: address.state,
+          zipCode: address.zip,
+          normalizedStreet,
+          lastUsedAt: new Date(),
+        },
+      });
+    }
+
+    return {
+      id: toUuid(savedRow.id),
+      label: savedRow.label ?? null,
+      address: {
+        street: savedRow.street,
+        city: savedRow.city,
+        state: savedRow.state,
+        zip: savedRow.zipCode,
+      },
+      lastUsedAt: savedRow.lastUsedAt.toISOString(),
+    };
+  }
+
+  // =========================================================================
+  // Follow-Up Timing Settings (Merged from operations-service)
+  // =========================================================================
+
+  static async getFollowUpSettings(tenantId: string) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const settings = await (prisma as any).followUpSettings.findUnique({
+      where: { tenantId: cleanTenantId },
+    });
+
+    if (!settings) {
+      return {
+        feedbackCallDelayMinutes: 300,
+        isTechnicianCheckInEnabled: false,
+        technicianCheckInDelayMinutes: 60,
+        recipes: null,
+        updatedBy: 'system',
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    return {
+      feedbackCallDelayMinutes: settings.feedbackCallDelayMinutes,
+      isTechnicianCheckInEnabled: settings.isTechnicianCheckInEnabled,
+      technicianCheckInDelayMinutes: settings.technicianCheckInDelayMinutes,
+      recipes: settings.recipes ?? null,
+      updatedBy: settings.updatedBy,
+      updatedAt: settings.updatedAt.toISOString(),
+    };
+  }
+
+  static async updateFollowUpSettings(
+    tenantId: string,
+    data: {
+      feedbackCallDelayMinutes?: number;
+      isTechnicianCheckInEnabled?: boolean;
+      technicianCheckInDelayMinutes?: number;
+      recipes?: any;
+    },
+    updatedBy: string = 'system'
+  ) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const updated = await (prisma as any).followUpSettings.upsert({
+      where: { tenantId: cleanTenantId },
+      create: {
+        tenantId: cleanTenantId,
+        feedbackCallDelayMinutes: data.feedbackCallDelayMinutes ?? 300,
+        isTechnicianCheckInEnabled: data.isTechnicianCheckInEnabled ?? false,
+        technicianCheckInDelayMinutes: data.technicianCheckInDelayMinutes ?? 60,
+        recipes: data.recipes ?? null,
+        updatedBy,
+      },
+      update: {
+        ...(data.feedbackCallDelayMinutes !== undefined ? { feedbackCallDelayMinutes: data.feedbackCallDelayMinutes } : {}),
+        ...(data.isTechnicianCheckInEnabled !== undefined ? { isTechnicianCheckInEnabled: data.isTechnicianCheckInEnabled } : {}),
+        ...(data.technicianCheckInDelayMinutes !== undefined ? { technicianCheckInDelayMinutes: data.technicianCheckInDelayMinutes } : {}),
+        ...(data.recipes !== undefined ? { recipes: data.recipes } : {}),
+        updatedBy,
+      },
+    });
+
+    return {
+      feedbackCallDelayMinutes: updated.feedbackCallDelayMinutes,
+      isTechnicianCheckInEnabled: updated.isTechnicianCheckInEnabled,
+      technicianCheckInDelayMinutes: updated.technicianCheckInDelayMinutes,
+      recipes: updated.recipes ?? null,
+      updatedBy: updated.updatedBy,
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+  }
+
+  // =========================================================================
+  // Technician Mid-Job Check-Ins (Merged from operations-service)
+  // =========================================================================
+
+  static async recordTechnicianCheckIn(
+    tenantId: string,
+    data: {
+      serviceRequestId: string;
+      retellCallId?: string;
+      progress: string;
+      challenges?: string;
+      isHelpNeeded?: boolean;
+      expectedFinishMinutes?: number;
+    }
+  ) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const cleanRequestId = fromUuid(data.serviceRequestId) || data.serviceRequestId;
+
+    let checkIn;
+    if (data.retellCallId) {
+      checkIn = await (prisma as any).technicianCheckIn.upsert({
+        where: {
+          tenantId_retellCallId: {
+            tenantId: cleanTenantId,
+            retellCallId: data.retellCallId,
+          },
+        },
+        create: {
+          tenantId: cleanTenantId,
+          serviceRequestId: cleanRequestId,
+          retellCallId: data.retellCallId,
+          progress: data.progress,
+          challenges: data.challenges || null,
+          isHelpNeeded: data.isHelpNeeded ?? false,
+          expectedFinishMinutes: data.expectedFinishMinutes ?? null,
+        },
+        update: {
+          progress: data.progress,
+          challenges: data.challenges || null,
+          isHelpNeeded: data.isHelpNeeded ?? false,
+          expectedFinishMinutes: data.expectedFinishMinutes ?? null,
+        },
+      });
+    } else {
+      checkIn = await (prisma as any).technicianCheckIn.create({
+        data: {
+          tenantId: cleanTenantId,
+          serviceRequestId: cleanRequestId,
+          progress: data.progress,
+          challenges: data.challenges || null,
+          isHelpNeeded: data.isHelpNeeded ?? false,
+          expectedFinishMinutes: data.expectedFinishMinutes ?? null,
+        },
+      });
+    }
+
+    // Push real-time notification to office dispatchers/managers via SSE
+    try {
+      await NotificationService.create({
+        tenantId: cleanTenantId,
+        type: data.isHelpNeeded ? 'ESCALATION_REQUIRED' : 'TECH_STATUS_CHANGE',
+        title: data.isHelpNeeded ? 'Technician Needs Help' : 'Technician Check-In',
+        message: data.isHelpNeeded
+          ? `Technician reported challenge: ${data.challenges || data.progress}`
+          : `Technician check-in: ${data.progress}`,
+        priority: data.isHelpNeeded ? 'URGENT' : 'NORMAL',
+        entityType: 'JOB',
+        entityId: cleanRequestId,
+      });
+    } catch (e: any) {
+      console.warn('Could not dispatch check-in notification:', e.message);
+    }
+
+    return { id: toUuid(checkIn.id) };
+  }
+
+  static async listTechnicianCheckIns(tenantId: string, serviceRequestId?: string) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const cleanRequestId = serviceRequestId ? fromUuid(serviceRequestId) || serviceRequestId : undefined;
+
+    const list = await (prisma as any).technicianCheckIn.findMany({
+      where: {
+        tenantId: cleanTenantId,
+        ...(cleanRequestId ? { serviceRequestId: cleanRequestId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    return list.map((item: any) => ({
+      id: toUuid(item.id),
+      serviceRequestId: toUuid(item.serviceRequestId),
+      retellCallId: item.retellCallId ?? null,
+      progress: item.progress,
+      challenges: item.challenges ?? null,
+      isHelpNeeded: item.isHelpNeeded,
+      expectedFinishMinutes: item.expectedFinishMinutes ?? null,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
+    }));
+  }
+
+  // =========================================================================
+  // Service Areas CRUD (Merged from operations-service)
+  // =========================================================================
+
+  static async listServiceAreas(tenantId: string) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const areas = await (prisma as any).serviceArea.findMany({
+      where: { tenantId: cleanTenantId },
+      include: { zipCodes: true },
+      orderBy: { name: 'asc' },
+    });
+
+    return areas.map((a: any) => ({
+      id: toUuid(a.id),
+      name: a.name,
+      zipCodes: (a.zipCodes || []).map((z: any) => z.zipCode),
+    }));
+  }
+
+  static async createServiceArea(tenantId: string, data: { name: string; zipCodes: string[] }) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const area = await (prisma as any).serviceArea.create({
+      data: {
+        tenantId: cleanTenantId,
+        name: data.name,
+        zipCodes: {
+          create: (data.zipCodes || []).map((zip: string) => ({
+            tenantId: cleanTenantId,
+            zipCode: zip,
+          })),
+        },
+      },
+      include: { zipCodes: true },
+    });
+
+    return {
+      id: toUuid(area.id),
+      name: area.name,
+      zipCodes: (area.zipCodes || []).map((z: any) => z.zipCode),
+    };
+  }
+
+  static async deleteServiceArea(tenantId: string, id: string) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const cleanId = fromUuid(id) || id;
+    await (prisma as any).serviceArea.deleteMany({
+      where: { id: cleanId, tenantId: cleanTenantId },
+    });
+    return true;
   }
 }

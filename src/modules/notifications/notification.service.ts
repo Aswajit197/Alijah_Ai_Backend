@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database.js';
 import { NotificationType, NotificationPriority } from '@prisma/client';
+import { Response } from 'express';
 
 export interface CreateNotificationInput {
   tenantId: string;
@@ -14,7 +15,47 @@ export interface CreateNotificationInput {
   metadata?: Record<string, any>;
 }
 
+interface SSEClient {
+  id: string;
+  tenantId: string;
+  userId?: string | null;
+  res: Response;
+}
+
+const sseClients = new Map<string, SSEClient>();
+
 export class NotificationService {
+  /**
+   * Register an SSE client connection.
+   */
+  static addClient(id: string, tenantId: string, userId: string | null | undefined, res: Response) {
+    sseClients.set(id, { id, tenantId, userId: userId || null, res });
+  }
+
+  /**
+   * Remove an SSE client on disconnect.
+   */
+  static removeClient(id: string) {
+    sseClients.delete(id);
+  }
+
+  /**
+   * Broadcast an SSE event to connected subscribers for a tenant.
+   */
+  static broadcast(tenantId: string, event: string, data: any, targetUserId?: string | null) {
+    for (const [id, client] of sseClients.entries()) {
+      if (client.tenantId === tenantId) {
+        if (!targetUserId || !client.userId || client.userId === targetUserId) {
+          try {
+            client.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+          } catch (e) {
+            sseClients.delete(id);
+          }
+        }
+      }
+    }
+  }
+
   /**
    * Create an in-app operational notification.
    * If userId is omitted or null, it broadcasts to all tenant dispatchers/owners.
@@ -35,6 +76,12 @@ export class NotificationService {
           metadata: input.metadata || undefined,
         },
       });
+
+      // Broadcast immediately via SSE to connected users in this tenant
+      if (notification) {
+        NotificationService.broadcast(input.tenantId, 'notification', notification, input.userId);
+      }
+
       return notification;
     } catch (err: any) {
       console.error('Failed to create notification:', err.message);
