@@ -91,11 +91,14 @@ docker compose up -d
 docker compose ps
 ```
 
-*(Optional: If taking live inbound calls via Twilio/Retell, start ngrok):*
+### Live Telephony & Webhook Tunnel (ngrok)
+When testing live voice calls via Retell AI / WebRTC, start the ngrok tunnel so Retell can deliver event webhooks (`call_started`, `call_ended`, `call_analyzed`):
 ```powershell
+cd d:\PODS\ElijahAi\AiService
 docker compose --profile webhooks up -d ngrok
-# Or via CLI: ngrok http 4002
 ```
+- **Ngrok Web Inspector:** [http://localhost:4040](http://localhost:4040) (view live incoming payloads and HTTP status in real time).
+- **Automatic Fallback:** Even if ngrok is offline, the backend auto-syncs with Retell's REST API whenever calls are listed or opened in the Unified Inbox.
 
 ---
 

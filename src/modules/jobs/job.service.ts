@@ -1400,7 +1400,7 @@ export class JobService {
   }
 
   /**
-   * Lists live AI voice calls from voice-service.
+   * Lists live AI voice calls from voice-service and auto-syncs with Retell.
    */
   static async listCalls() {
     const token = jwt.sign(
@@ -1426,11 +1426,42 @@ export class JobService {
       throw new Error('Failed to retrieve calls from voice-service');
     }
     const data = (await res.json()) as any;
-    return data.data || [];
+    const calls = data.data || [];
+
+    // Auto-sync any registered or pending calls directly with Retell
+    const retellApiKey = process.env.RETELL_API_KEY || 'key_829d9744ce4e92946621ef640494';
+    await Promise.all(
+      calls.map(async (c: any) => {
+        if (c.retellCallId && (c.status === 'registered' || !c.summary || !c.transcript)) {
+          try {
+            const rRes = await fetch(`https://api.retellai.com/v2/get-call/${c.retellCallId}`, {
+              headers: { Authorization: `Bearer ${retellApiKey}` },
+            });
+            if (rRes.ok) {
+              const rData = (await rRes.json()) as any;
+              if (rData.call_status === 'ended') {
+                c.status = 'ended';
+                c.summary = rData.call_analysis?.call_summary || c.summary || 'Customer call completed';
+                c.transcript = rData.transcript || c.transcript;
+                c.durationMs = rData.duration_ms || c.durationMs;
+                c.userSentiment = rData.call_analysis?.user_sentiment || c.userSentiment || 'Neutral';
+                c.isSuccessful = rData.call_analysis?.call_successful ?? true;
+                c.recordingUrl = rData.recording_url || c.recordingUrl;
+                c.disconnectionReason = rData.disconnection_reason || c.disconnectionReason;
+              }
+            }
+          } catch {
+            // Retell sync fallback ignored
+          }
+        }
+      })
+    );
+
+    return calls;
   }
 
   /**
-   * Retrieves single live AI voice call details with transcript.
+   * Retrieves single live AI voice call details with transcript, auto-syncing from Retell if needed.
    */
   static async getCallDetail(callId: string) {
     const token = jwt.sign(
@@ -1456,6 +1487,32 @@ export class JobService {
       throw new Error('Failed to retrieve call detail from voice-service');
     }
     const data = (await res.json()) as any;
-    return data.data;
+    const call = data.data;
+
+    if (call && call.retellCallId && (call.status === 'registered' || !call.transcript || !call.summary)) {
+      try {
+        const retellApiKey = process.env.RETELL_API_KEY || 'key_829d9744ce4e92946621ef640494';
+        const rRes = await fetch(`https://api.retellai.com/v2/get-call/${call.retellCallId}`, {
+          headers: { Authorization: `Bearer ${retellApiKey}` },
+        });
+        if (rRes.ok) {
+          const rData = (await rRes.json()) as any;
+          if (rData.call_status === 'ended') {
+            call.status = 'ended';
+            call.summary = rData.call_analysis?.call_summary || call.summary || 'Customer call completed';
+            call.transcript = rData.transcript || call.transcript;
+            call.durationMs = rData.duration_ms || call.durationMs;
+            call.userSentiment = rData.call_analysis?.user_sentiment || call.userSentiment || 'Neutral';
+            call.isSuccessful = rData.call_analysis?.call_successful ?? true;
+            call.recordingUrl = rData.recording_url || call.recordingUrl;
+            call.disconnectionReason = rData.disconnection_reason || call.disconnectionReason;
+          }
+        }
+      } catch {
+        // Fallback ignored
+      }
+    }
+
+    return call;
   }
 }

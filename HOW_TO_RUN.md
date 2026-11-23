@@ -150,3 +150,11 @@ Opens automatically at **`http://localhost:5555`**.
      ```powershell
      Get-Process -Id (Get-NetTCPConnection -LocalPort 5000).OwningProcess | Stop-Process -Force
      ```
+4. **Retell Voice Calls & Webhooks (ngrok)**:
+   - To deliver live Retell call events to `voice-service:4002`, run:
+     ```powershell
+     cd d:\PODS\ElijahAi\AiService
+     docker compose --profile webhooks up -d ngrok
+     ```
+   - Inspect live webhook requests at [http://localhost:4040](http://localhost:4040).
+   - Even without ngrok, the core backend automatically syncs completed calls, audio recordings, and transcripts directly from Retell's API into the Unified Inbox.
