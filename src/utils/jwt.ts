@@ -1,5 +1,6 @@
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { env } from '../config/env.js';
+import { toUuid } from '../modules/internal/id-mapper.js';
 
 export interface SuperAdminTokenPayload {
   type: 'SUPER_ADMIN';
@@ -12,6 +13,7 @@ export interface TenantUserTokenPayload {
   type: 'TENANT_USER';
   sub: string;
   tenantId: string;
+  rawTenantId?: string;
   roleId: string;
   roleSlug: string;
   roles?: string[];
@@ -37,6 +39,8 @@ export function signTenantUserToken(payload: Omit<TenantUserTokenPayload, 'type'
   return jwt.sign(
     {
       ...payload,
+      tenantId: toUuid(payload.tenantId),
+      rawTenantId: payload.tenantId,
       type: 'TENANT_USER',
       roles: payload.roles || [payload.roleSlug],
     },

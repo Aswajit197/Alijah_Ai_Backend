@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, SuperAdminTokenPayload, TenantUserTokenPayload } from '../utils/jwt.js';
 import { errorResponse } from '../utils/response.js';
+import { fromUuid } from '../modules/internal/id-mapper.js';
 
 // Extend Express Request type
 declare global {
@@ -32,7 +33,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
       req.superAdmin = payload;
     } else if (payload.type === 'TENANT_USER') {
       req.tenantUser = payload;
-      req.tenantId = payload.tenantId;
+      req.tenantId = fromUuid(payload.tenantId) || payload.tenantId;
     }
     next();
   } catch (err: any) {

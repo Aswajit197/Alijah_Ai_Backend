@@ -1429,7 +1429,7 @@ export class JobService {
     const calls = data.data || [];
 
     // Auto-sync any registered or pending calls directly with Retell
-    const retellApiKey = process.env.RETELL_API_KEY || 'key_829d9744ce4e92946621ef640494';
+    const retellApiKey = process.env.RETELL_API_KEY;
     await Promise.all(
       calls.map(async (c: any) => {
         if (c.retellCallId && (c.status === 'registered' || !c.summary || !c.transcript)) {
@@ -1491,7 +1491,7 @@ export class JobService {
 
     if (call && call.retellCallId && (call.status === 'registered' || !call.transcript || !call.summary)) {
       try {
-        const retellApiKey = process.env.RETELL_API_KEY || 'key_829d9744ce4e92946621ef640494';
+        const retellApiKey = process.env.RETELL_API_KEY;
         const rRes = await fetch(`https://api.retellai.com/v2/get-call/${call.retellCallId}`, {
           headers: { Authorization: `Bearer ${retellApiKey}` },
         });

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { InternalService } from '../internal/internal.service.js';
+import { TenantSettingsService } from '../../services/tenantSettings.service.js';
 
 function getTenantId(req: Request): string {
   const tenantId = req.tenantId || (req.headers['x-tenant-id'] as string);
@@ -99,12 +100,85 @@ export class OperationsController {
     }
   }
 
+  static async recordTechnicianCheckIn(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const data = await InternalService.recordTechnicianCheckIn(tenantId, req.body);
+      return res.status(201).json({ data });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
   // Technician Recommendations for Dispatch
   static async recommendTechnicians(req: Request, res: Response) {
     try {
       const tenantId = getTenantId(req);
       const data = await InternalService.recommendTechnicians(tenantId, String(req.params.jobId));
       return res.json({ data });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  // Agent & Prompt Studio Settings
+  static async getAgentSettings(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const settings = TenantSettingsService.getSettings(tenantId);
+      return res.json({
+        data: {
+          mode: settings.agentMode || 'single',
+          inboundGreeting: settings.inboundGreeting,
+          followUpGreeting: settings.followUpGreeting,
+          prompt: settings.receptionistPrompt,
+          promptVersions: settings.promptVersions || [],
+        },
+      });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  static async updateAgentSettings(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const user = req.tenantUser?.name || req.tenantUser?.sub || 'Owner';
+      const result = TenantSettingsService.savePrompt(tenantId, req.body, user);
+      return res.json({ data: result });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  static async listPromptVersions(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const settings = TenantSettingsService.getSettings(tenantId);
+      return res.json({ data: settings.promptVersions || [] });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  static async restorePromptVersion(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const version = parseInt(String(req.params.version), 10);
+      const user = req.tenantUser?.name || req.tenantUser?.sub || 'Owner';
+      const settings = TenantSettingsService.restorePromptVersion(tenantId, version, user);
+      return res.json({ data: settings });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  static async resetPromptToDefault(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const user = req.tenantUser?.name || req.tenantUser?.sub || 'Owner';
+      const settings = TenantSettingsService.resetPromptToDefault(tenantId, user);
+      return res.json({ data: settings });
     } catch (error: any) {
       return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
     }

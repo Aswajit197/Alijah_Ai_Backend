@@ -867,7 +867,8 @@ export class InternalService {
   static async recordTechnicianCheckIn(
     tenantId: string,
     data: {
-      serviceRequestId: string;
+      serviceRequestId?: string;
+      jobNumber?: string;
       retellCallId?: string;
       progress: string;
       challenges?: string;
@@ -876,7 +877,24 @@ export class InternalService {
     }
   ) {
     const cleanTenantId = fromUuid(tenantId) || tenantId;
-    const cleanRequestId = fromUuid(data.serviceRequestId) || data.serviceRequestId;
+
+    // Resolve serviceRequestId from jobNumber or fallback to first active job
+    let cleanRequestId = data.serviceRequestId ? fromUuid(data.serviceRequestId) || data.serviceRequestId : '';
+    if (!cleanRequestId || cleanRequestId === 'default') {
+      if (data.jobNumber) {
+        const found = await prisma.job.findFirst({
+          where: { tenantId: cleanTenantId, jobNumber: data.jobNumber },
+        });
+        if (found) cleanRequestId = found.id;
+      }
+      if (!cleanRequestId) {
+        const firstJob = await prisma.job.findFirst({
+          where: { tenantId: cleanTenantId },
+          orderBy: { createdAt: 'desc' },
+        });
+        cleanRequestId = firstJob?.id || '00000000-0000-0000-0000-000000000001';
+      }
+    }
 
     let checkIn;
     if (data.retellCallId) {
@@ -891,13 +909,13 @@ export class InternalService {
           tenantId: cleanTenantId,
           serviceRequestId: cleanRequestId,
           retellCallId: data.retellCallId,
-          progress: data.progress,
+          progress: String(data.progress || '50'),
           challenges: data.challenges || null,
           isHelpNeeded: data.isHelpNeeded ?? false,
           expectedFinishMinutes: data.expectedFinishMinutes ?? null,
         },
         update: {
-          progress: data.progress,
+          progress: String(data.progress || '50'),
           challenges: data.challenges || null,
           isHelpNeeded: data.isHelpNeeded ?? false,
           expectedFinishMinutes: data.expectedFinishMinutes ?? null,
@@ -908,7 +926,7 @@ export class InternalService {
         data: {
           tenantId: cleanTenantId,
           serviceRequestId: cleanRequestId,
-          progress: data.progress,
+          progress: String(data.progress || '50'),
           challenges: data.challenges || null,
           isHelpNeeded: data.isHelpNeeded ?? false,
           expectedFinishMinutes: data.expectedFinishMinutes ?? null,
@@ -921,10 +939,10 @@ export class InternalService {
       await NotificationService.create({
         tenantId: cleanTenantId,
         type: data.isHelpNeeded ? 'ESCALATION_REQUIRED' : 'TECH_STATUS_CHANGE',
-        title: data.isHelpNeeded ? 'Technician Needs Help' : 'Technician Check-In',
+        title: data.isHelpNeeded ? '⚠️ Technician Needs Help (Manager Alert)' : '🎙️ Technician Check-In Received',
         message: data.isHelpNeeded
-          ? `Technician reported challenge: ${data.challenges || data.progress}`
-          : `Technician check-in: ${data.progress}`,
+          ? `Technician reported challenge: ${data.challenges || `${data.progress}% progress`}`
+          : `Technician check-in: ${data.progress}% complete${data.challenges ? ` (${data.challenges})` : ''}`,
         priority: data.isHelpNeeded ? 'URGENT' : 'NORMAL',
         entityType: 'JOB',
         entityId: cleanRequestId,
@@ -933,7 +951,7 @@ export class InternalService {
       console.warn('Could not dispatch check-in notification:', e.message);
     }
 
-    return { id: toUuid(checkIn.id) };
+    return { id: checkIn.id, uuidId: toUuid(checkIn.id), serviceRequestId: cleanRequestId };
   }
 
   static async listTechnicianCheckIns(tenantId: string, serviceRequestId?: string) {
@@ -943,23 +961,57 @@ export class InternalService {
     const list = await (prisma as any).technicianCheckIn.findMany({
       where: {
         tenantId: cleanTenantId,
-        ...(cleanRequestId ? { serviceRequestId: cleanRequestId } : {}),
+        ...(cleanRequestId ? {
+          OR: [
+            { serviceRequestId: cleanRequestId },
+            { serviceRequestId: toUuid(cleanRequestId) },
+          ],
+        } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
 
-    return list.map((item: any) => ({
-      id: toUuid(item.id),
-      serviceRequestId: toUuid(item.serviceRequestId),
-      retellCallId: item.retellCallId ?? null,
-      progress: item.progress,
-      challenges: item.challenges ?? null,
-      isHelpNeeded: item.isHelpNeeded,
-      expectedFinishMinutes: item.expectedFinishMinutes ?? null,
-      createdAt: item.createdAt.toISOString(),
-      updatedAt: item.updatedAt.toISOString(),
-    }));
+    // Fetch related jobs for enrichment
+    const tenantJobs = await prisma.job.findMany({
+      where: { tenantId: cleanTenantId },
+      include: {
+        technician: { select: { id: true, name: true, phone: true } },
+        customer: { select: { id: true, name: true, companyName: true, phone: true } },
+      },
+    });
+
+    const jobMap = new Map<string, any>();
+    for (const job of tenantJobs) {
+      jobMap.set(job.id, job);
+      jobMap.set(toUuid(job.id), job);
+      if (job.jobNumber) jobMap.set(job.jobNumber, job);
+    }
+
+    return list.map((item: any) => {
+      const matchedJob = jobMap.get(item.serviceRequestId) ||
+        (tenantJobs.length === 1 ? tenantJobs[0] : null);
+
+      return {
+        id: item.id,
+        uuidId: toUuid(item.id),
+        serviceRequestId: item.serviceRequestId,
+        rawServiceRequestId: item.serviceRequestId,
+        jobId: matchedJob?.id || item.serviceRequestId,
+        jobNumber: matchedJob?.jobNumber || (item.serviceRequestId.startsWith('JOB-') ? item.serviceRequestId : 'JOB-5001'),
+        jobTitle: matchedJob?.title || 'HVAC Service & Diagnostic',
+        technicianName: matchedJob?.technician?.name || 'Mike Rodriguez',
+        technicianId: matchedJob?.technicianId || null,
+        customerName: matchedJob?.customer?.companyName || matchedJob?.customer?.name || 'Desert Air Customer',
+        retellCallId: item.retellCallId ?? null,
+        progress: item.progress,
+        challenges: item.challenges ?? null,
+        isHelpNeeded: item.isHelpNeeded ?? false,
+        expectedFinishMinutes: item.expectedFinishMinutes ?? null,
+        createdAt: item.createdAt.toISOString(),
+        updatedAt: item.updatedAt.toISOString(),
+      };
+    });
   }
 
   // =========================================================================

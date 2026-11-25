@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { OperationsController } from './operations.controller.js';
 import { verifyToken } from '../../utils/jwt.js';
+import { fromUuid } from '../internal/id-mapper.js';
 
 export const operationsRoutes = Router();
 
@@ -12,7 +13,7 @@ operationsRoutes.use((req: Request, _res: Response, next: NextFunction) => {
       const payload = verifyToken(authHeader.split(' ')[1]);
       if (payload.type === 'TENANT_USER') {
         req.tenantUser = payload;
-        req.tenantId = payload.tenantId;
+        req.tenantId = fromUuid(payload.tenantId) || payload.tenantId;
       }
     } catch {
       // Ignored for dev fallback
@@ -39,6 +40,14 @@ operationsRoutes.put('/follow-up-settings', OperationsController.updateFollowUpS
 
 // Technician Check-Ins
 operationsRoutes.get('/technician-check-ins', OperationsController.listTechnicianCheckIns);
+operationsRoutes.post('/technician-check-ins', OperationsController.recordTechnicianCheckIn);
 
 // AI Technician Match Recommendations
 operationsRoutes.get('/jobs/:jobId/technician-recommendations', OperationsController.recommendTechnicians);
+
+// AI Agent Prompt Studio & Version Rollback
+operationsRoutes.get('/agent-settings', OperationsController.getAgentSettings);
+operationsRoutes.put('/agent-settings', OperationsController.updateAgentSettings);
+operationsRoutes.get('/agent-prompt-versions', OperationsController.listPromptVersions);
+operationsRoutes.post('/agent-prompt-versions/:version/restore', OperationsController.restorePromptVersion);
+operationsRoutes.post('/agent-prompt/reset-to-default', OperationsController.resetPromptToDefault);
