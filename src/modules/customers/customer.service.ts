@@ -129,7 +129,33 @@ export class CustomerService {
       throw new Error('Customer not found');
     }
 
-    return customer;
+    // Multi-location support: fetch all property locations associated with this customer's phone
+    const cleanPhone = customer.phone.replace(/[^\d+]/g, '');
+    const knownAddresses = await prisma.callerAddress.findMany({
+      where: {
+        tenantId,
+        OR: [
+          { phoneNumber: customer.phone },
+          { phoneNumber: cleanPhone },
+          ...(cleanPhone.startsWith('+1') ? [{ phoneNumber: cleanPhone.substring(2) }] : []),
+          ...(cleanPhone.length === 10 ? [{ phoneNumber: `+1${cleanPhone}` }] : []),
+        ],
+      },
+      orderBy: { lastUsedAt: 'desc' },
+    });
+
+    return {
+      ...customer,
+      knownAddresses: knownAddresses.map((a) => ({
+        id: a.id,
+        label: a.label || 'Property Location',
+        street: a.street,
+        city: a.city,
+        state: a.state,
+        zipCode: a.zipCode,
+        lastUsedAt: a.lastUsedAt,
+      })),
+    };
   }
 
   /**
