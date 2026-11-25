@@ -379,7 +379,7 @@ export class JobService {
     this.broadcastTrackingUpdate(jobId);
 
     // Notify dispatchers of tech progress
-    if (['DISPATCHED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED', 'CANCELLED'].includes(status)) {
+    if (status && ['DISPATCHED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED', 'CANCELLED'].includes(status)) {
       const actionTitle = status === 'DISPATCHED' 
         ? `Tech ${updated.technician?.name || 'Technician'} ACCEPTED offer`
         : `Tech ${updated.technician?.name || 'Technician'} is ${status.replace('_', ' ')}`;
@@ -620,10 +620,10 @@ export class JobService {
     this.broadcastTrackingUpdate(jobId);
 
     // Notify dispatchers of tech progress
-    if (['DISPATCHED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED', 'CANCELLED'].includes(status)) {
-      const actionTitle = status === 'DISPATCHED' 
+    if (data.status && ['DISPATCHED', 'EN_ROUTE', 'ON_SITE', 'COMPLETED', 'CANCELLED'].includes(data.status)) {
+      const actionTitle = data.status === 'DISPATCHED' 
         ? `Tech ${updated.technician?.name || 'Technician'} ACCEPTED offer`
-        : `Tech ${updated.technician?.name || 'Technician'} is ${status.replace('_', ' ')}`;
+        : `Tech ${updated.technician?.name || 'Technician'} is ${data.status.replace('_', ' ')}`;
 
       NotificationService.create({
         tenantId,
@@ -1121,7 +1121,7 @@ export class JobService {
             reportedIssue: input.reportedIssue,
             scheduledWindow: windowStr,
             timeWindow: windowStr,
-            jobNumber: job.jobNumber,
+            jobNumber: job.jobNumber || '',
             tenantName: tenant.name,
             isEmergency: input.priority === 'EMERGENCY',
             priority: input.priority || 'NORMAL',

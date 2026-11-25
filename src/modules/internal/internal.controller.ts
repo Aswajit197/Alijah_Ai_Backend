@@ -512,7 +512,7 @@ export class InternalController {
    */
   static async deleteServiceArea(req: InternalRequest, res: Response) {
     try {
-      await InternalService.deleteServiceArea(req.tenantId!, req.params.serviceAreaId);
+      await InternalService.deleteServiceArea(req.tenantId!, String(req.params.serviceAreaId));
       return res.status(204).send();
     } catch (error: any) {
       return res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: error.message } });

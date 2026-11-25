@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { JobService } from './job.service.js';
+import { InternalService } from '../internal/internal.service.js';
 import { successResponse, errorResponse } from '../../utils/response.js';
 import { jobEvents } from '../../utils/jobEvents.js';
 
@@ -280,6 +281,15 @@ export class JobController {
       return successResponse(res, call, 'Voice call detail retrieved');
     } catch (err: any) {
       return errorResponse(res, err.message, 404);
+    }
+  }
+
+  static async getTechnicianRecommendations(req: Request, res: Response) {
+    try {
+      const candidates = await InternalService.recommendTechnicians(req.tenantId!, String(req.params.id));
+      return successResponse(res, candidates, 'Technician recommendations retrieved');
+    } catch (err: any) {
+      return errorResponse(res, err.message, 400);
     }
   }
 }

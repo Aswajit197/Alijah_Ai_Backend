@@ -86,7 +86,7 @@ export class NotificationController {
   static async markRead(req: Request, res: Response) {
     try {
       const tenantId = req.tenantId || req.tenantUser?.tenantId;
-      const { id } = req.params;
+      const id = String(req.params.id);
       if (!tenantId || !id) {
         return errorResponse(res, 'Missing tenant or notification ID', 400);
       }
@@ -126,7 +126,7 @@ export class NotificationController {
   static async delete(req: Request, res: Response) {
     try {
       const tenantId = req.tenantId || req.tenantUser?.tenantId;
-      const { id } = req.params;
+      const id = String(req.params.id);
       if (!tenantId || !id) {
         return errorResponse(res, 'Missing tenant or notification ID', 400);
       }

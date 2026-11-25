@@ -20,6 +20,7 @@ router.get('/voice-calls', JobController.listCalls);
 router.get('/voice-calls/:callId', JobController.getCallDetail);
 router.get('/technicians', JobController.listTechnicians);
 router.get('/active-tech', JobController.getActiveTechJob);
+router.get('/:id/technician-recommendations', JobController.getTechnicianRecommendations);
 router.get('/:id', JobController.getById);
 
 // Write routes

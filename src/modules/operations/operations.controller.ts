@@ -41,7 +41,7 @@ export class OperationsController {
   static async updateServiceArea(req: Request, res: Response) {
     try {
       const tenantId = getTenantId(req);
-      const data = await InternalService.updateServiceArea(tenantId, req.params.serviceAreaId, req.body);
+      const data = await InternalService.updateServiceArea(tenantId, String(req.params.serviceAreaId), req.body);
       return res.json({ data });
     } catch (error: any) {
       if (error.code === 'P2002') {
@@ -58,7 +58,7 @@ export class OperationsController {
   static async deleteServiceArea(req: Request, res: Response) {
     try {
       const tenantId = getTenantId(req);
-      await InternalService.deleteServiceArea(tenantId, req.params.serviceAreaId);
+      await InternalService.deleteServiceArea(tenantId, String(req.params.serviceAreaId));
       return res.status(204).send();
     } catch (error: any) {
       return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
@@ -79,7 +79,7 @@ export class OperationsController {
   static async updateFollowUpSettings(req: Request, res: Response) {
     try {
       const tenantId = getTenantId(req);
-      const updatedBy = req.tenantUser?.userId || 'user';
+      const updatedBy = req.tenantUser?.sub || 'user';
       const data = await InternalService.updateFollowUpSettings(tenantId, req.body, updatedBy);
       return res.json({ data });
     } catch (error: any) {
@@ -93,6 +93,17 @@ export class OperationsController {
       const tenantId = getTenantId(req);
       const serviceRequestId = req.query.serviceRequestId ? String(req.query.serviceRequestId) : undefined;
       const data = await InternalService.listTechnicianCheckIns(tenantId, serviceRequestId);
+      return res.json({ data });
+    } catch (error: any) {
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  // Technician Recommendations for Dispatch
+  static async recommendTechnicians(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const data = await InternalService.recommendTechnicians(tenantId, String(req.params.jobId));
       return res.json({ data });
     } catch (error: any) {
       return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });

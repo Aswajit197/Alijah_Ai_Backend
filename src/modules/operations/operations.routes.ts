@@ -39,3 +39,6 @@ operationsRoutes.put('/follow-up-settings', OperationsController.updateFollowUpS
 
 // Technician Check-Ins
 operationsRoutes.get('/technician-check-ins', OperationsController.listTechnicianCheckIns);
+
+// AI Technician Match Recommendations
+operationsRoutes.get('/jobs/:jobId/technician-recommendations', OperationsController.recommendTechnicians);
