@@ -695,6 +695,102 @@ export class InternalService {
   // Follow-Up Timing Settings (Merged from operations-service)
   // =========================================================================
 
+  static readonly DEFAULT_RECIPES = [
+    {
+      id: 'unsold-estimate',
+      title: 'Unsold estimate follow-up',
+      trigger: 'An estimate is sent',
+      runningCount: 1,
+      isEnabled: true,
+      steps: [
+        {
+          id: 'ue-1',
+          type: 'text',
+          label: 'Send text',
+          waitDays: 3,
+          content: "Hi {first}, it's Elijah with Desert Air. Any questions about the estimate for {trade}?",
+        },
+        {
+          id: 'ue-2',
+          type: 'call_task',
+          label: 'Create call task',
+          waitDays: 3,
+          content: 'Call {first} about estimate {ref}',
+        },
+        {
+          id: 'ue-3',
+          type: 'email',
+          label: 'Send email',
+          waitDays: 5,
+          content: 'Your Desert Air options and financing, recapped',
+        },
+        {
+          id: 'ue-4',
+          type: 'final_text',
+          label: 'Final text',
+          waitDays: 10,
+          content: "Hi {first}, we'll close out your estimate for now. Let us know if you'd like to revisit!",
+        },
+      ],
+      stopsWhen: ['Customer replies', 'Estimate accepted', 'Appointment booked', 'Opt-out keyword', 'Dispute logged'],
+    },
+    {
+      id: 'past-due-invoice',
+      title: 'Past-due invoice',
+      trigger: 'An invoice is past due',
+      runningCount: 1,
+      isEnabled: true,
+      steps: [
+        {
+          id: 'pdi-1',
+          type: 'text',
+          label: 'Send text',
+          waitDays: 0,
+          content: 'Hi {first}, a friendly reminder from Desert Air: invoice {ref} is due.',
+        },
+        {
+          id: 'pdi-2',
+          type: 'text',
+          label: 'Send text',
+          waitDays: 7,
+          content: 'Hi {first}, invoice {ref} ({amount}) is still open. Pay online: {link}',
+        },
+        {
+          id: 'pdi-3',
+          type: 'email',
+          label: 'Send email',
+          waitDays: 7,
+          content: 'Invoice {ref}: balance reminder',
+        },
+        {
+          id: 'pdi-4',
+          type: 'call_task',
+          label: 'Create call task',
+          waitDays: 7,
+          content: 'Finance: call {first} about {ref}',
+        },
+      ],
+      stopsWhen: ['Payment received', 'Dispute logged', 'Promise to pay noted', 'Human takeover'],
+    },
+    {
+      id: 'missed-call',
+      title: 'Missed call text-back',
+      trigger: 'A call is missed',
+      runningCount: 0,
+      isEnabled: true,
+      steps: [
+        {
+          id: 'mc-1',
+          type: 'text',
+          label: 'Send text',
+          waitDays: 0,
+          content: "Sorry we missed your call! This is Elijah, Desert Air's AI receptionist. How can I help you today?",
+        },
+      ],
+      stopsWhen: ['Customer replies', 'Booked', 'Opt-outs', 'Complaints', 'Disputes', 'Human takeover'],
+    },
+  ];
+
   static async getFollowUpSettings(tenantId: string) {
     const cleanTenantId = fromUuid(tenantId) || tenantId;
     const settings = await (prisma as any).followUpSettings.findUnique({
@@ -706,7 +802,7 @@ export class InternalService {
         feedbackCallDelayMinutes: 300,
         isTechnicianCheckInEnabled: false,
         technicianCheckInDelayMinutes: 60,
-        recipes: null,
+        recipes: InternalService.DEFAULT_RECIPES,
         updatedBy: 'system',
         updatedAt: new Date().toISOString(),
       };
@@ -716,7 +812,9 @@ export class InternalService {
       feedbackCallDelayMinutes: settings.feedbackCallDelayMinutes,
       isTechnicianCheckInEnabled: settings.isTechnicianCheckInEnabled,
       technicianCheckInDelayMinutes: settings.technicianCheckInDelayMinutes,
-      recipes: settings.recipes ?? null,
+      recipes: (settings.recipes && Array.isArray(settings.recipes) && settings.recipes.length > 0)
+        ? settings.recipes
+        : InternalService.DEFAULT_RECIPES,
       updatedBy: settings.updatedBy,
       updatedAt: settings.updatedAt.toISOString(),
     };
@@ -740,7 +838,7 @@ export class InternalService {
         feedbackCallDelayMinutes: data.feedbackCallDelayMinutes ?? 300,
         isTechnicianCheckInEnabled: data.isTechnicianCheckInEnabled ?? false,
         technicianCheckInDelayMinutes: data.technicianCheckInDelayMinutes ?? 60,
-        recipes: data.recipes ?? null,
+        recipes: data.recipes ?? InternalService.DEFAULT_RECIPES,
         updatedBy,
       },
       update: {
@@ -756,7 +854,7 @@ export class InternalService {
       feedbackCallDelayMinutes: updated.feedbackCallDelayMinutes,
       isTechnicianCheckInEnabled: updated.isTechnicianCheckInEnabled,
       technicianCheckInDelayMinutes: updated.technicianCheckInDelayMinutes,
-      recipes: updated.recipes ?? null,
+      recipes: updated.recipes ?? InternalService.DEFAULT_RECIPES,
       updatedBy: updated.updatedBy,
       updatedAt: updated.updatedAt.toISOString(),
     };
