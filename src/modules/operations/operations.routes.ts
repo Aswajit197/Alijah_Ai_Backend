@@ -30,6 +30,7 @@ operationsRoutes.use((req: Request, _res: Response, next: NextFunction) => {
 // Service Areas
 operationsRoutes.get('/service-areas', OperationsController.listServiceAreas);
 operationsRoutes.post('/service-areas', OperationsController.createServiceArea);
+operationsRoutes.put('/service-areas/:serviceAreaId', OperationsController.updateServiceArea);
 operationsRoutes.delete('/service-areas/:serviceAreaId', OperationsController.deleteServiceArea);
 
 // Follow-Up Settings

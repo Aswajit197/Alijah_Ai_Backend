@@ -906,6 +906,53 @@ export class InternalService {
     };
   }
 
+  static async updateServiceArea(
+    tenantId: string,
+    id: string,
+    data: { name?: string; zipCodes?: string[] }
+  ) {
+    const cleanTenantId = fromUuid(tenantId) || tenantId;
+    const cleanId = fromUuid(id) || id;
+
+    return await (prisma as any).$transaction(async (tx: any) => {
+      if (data.name) {
+        await tx.serviceArea.update({
+          where: { id: cleanId },
+          data: { name: data.name },
+        });
+      }
+
+      if (data.zipCodes && Array.isArray(data.zipCodes)) {
+        await tx.serviceAreaZipCode.deleteMany({
+          where: { serviceAreaId: cleanId, tenantId: cleanTenantId },
+        });
+
+        await tx.serviceAreaZipCode.createMany({
+          data: data.zipCodes.map((zip: string) => ({
+            tenantId: cleanTenantId,
+            serviceAreaId: cleanId,
+            zipCode: String(zip).trim(),
+          })),
+        });
+      }
+
+      const updated = await tx.serviceArea.findUnique({
+        where: { id: cleanId },
+        include: { zipCodes: true },
+      });
+
+      if (!updated) {
+        throw new Error('Service area not found');
+      }
+
+      return {
+        id: toUuid(updated.id),
+        name: updated.name,
+        zipCodes: (updated.zipCodes || []).map((z: any) => z.zipCode),
+      };
+    });
+  }
+
   static async deleteServiceArea(tenantId: string, id: string) {
     const cleanTenantId = fromUuid(tenantId) || tenantId;
     const cleanId = fromUuid(id) || id;

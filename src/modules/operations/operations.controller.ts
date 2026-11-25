@@ -27,6 +27,30 @@ export class OperationsController {
       const data = await InternalService.createServiceArea(tenantId, req.body);
       return res.status(201).json({ data });
     } catch (error: any) {
+      if (error.code === 'P2002') {
+        const target = String(error.meta?.target || '');
+        if (target.includes('name')) {
+          return res.status(409).json({ error: { code: 'SERVICE_AREA_NAME_TAKEN', message: 'Service area name already exists' } });
+        }
+        return res.status(409).json({ error: { code: 'ZIP_CODE_ALREADY_SERVED', message: 'One or more ZIP codes are already served' } });
+      }
+      return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
+    }
+  }
+
+  static async updateServiceArea(req: Request, res: Response) {
+    try {
+      const tenantId = getTenantId(req);
+      const data = await InternalService.updateServiceArea(tenantId, req.params.serviceAreaId, req.body);
+      return res.json({ data });
+    } catch (error: any) {
+      if (error.code === 'P2002') {
+        const target = String(error.meta?.target || '');
+        if (target.includes('name')) {
+          return res.status(409).json({ error: { code: 'SERVICE_AREA_NAME_TAKEN', message: 'Service area name already exists' } });
+        }
+        return res.status(409).json({ error: { code: 'ZIP_CODE_ALREADY_SERVED', message: 'One or more ZIP codes are already served' } });
+      }
       return res.status(400).json({ error: { code: 'BAD_REQUEST', message: error.message } });
     }
   }
