@@ -729,7 +729,7 @@ export class JobService {
    * Fetches technicians list for swimlane columns.
    */
   static async listTechnicians(tenantId: string) {
-    return prisma.user.findMany({
+    const users = await prisma.user.findMany({
       where: {
         tenantId,
         isActive: true,
@@ -753,6 +753,16 @@ export class JobService {
       },
       orderBy: { name: 'asc' },
     });
+
+    // Prioritize dedicated field technicians first!
+    users.sort((a, b) => {
+      const aTech = a.role?.slug === 'technician' ? 1 : 0;
+      const bTech = b.role?.slug === 'technician' ? 1 : 0;
+      if (bTech !== aTech) return bTech - aTech;
+      return a.name.localeCompare(b.name);
+    });
+
+    return users;
   }
 
   /**
@@ -1411,7 +1421,9 @@ export class JobService {
         } else {
           // If existing job was associated with generic seed customer and we now have the real customer from core-service, update it!
           const updates: any = {};
-          if (techId && existing.technicianId !== techId) {
+          // Only assign initial technician if the job does not yet have one assigned
+          // NEVER overwrite a technician that was already dispatched, rescheduled, or assigned by management!
+          if (techId && !existing.technicianId) {
             updates.technicianId = techId;
             updates.status = jobStatus;
           }
