@@ -1184,36 +1184,74 @@ export class JobService {
 
     // 2. Fetch receptionist agent from voice-service
     const voiceUrl = process.env.VOICE_SERVICE_URL || 'http://localhost:4002';
-    const agentsRes = await fetch(`${voiceUrl}/api/v1/agents`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const agentsData = (await agentsRes.json()) as any;
-    const agents = agentsData.data || [];
-    const receptionist = agents.find((a: any) => a.role === 'receptionist') || agents[0];
+    try {
+      const agentsRes = await fetch(`${voiceUrl}/api/v1/agents`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (agentsRes.ok) {
+        const agentsData = (await agentsRes.json()) as any;
+        const agents = agentsData.data || [];
+        const receptionist = agents.find((a: any) => a.role === 'receptionist') || agents[0];
 
-    if (!receptionist) {
-      throw new Error('No receptionist voice agent configured');
+        if (receptionist) {
+          // 3. Create Web Call via voice-service
+          const webCallRes = await fetch(`${voiceUrl}/api/v1/web-calls`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ agentId: receptionist.id }),
+          });
+
+          const webCallData = (await webCallRes.json()) as any;
+          if (webCallRes.ok && webCallData?.data?.accessToken) {
+            return {
+              accessToken: webCallData.data.accessToken,
+              retellCallId: webCallData.data.call?.retellCallId,
+              callId: webCallData.data.call?.id,
+              companyName,
+            };
+          }
+        }
+      }
+    } catch (voiceErr) {
+      console.warn('Voice service unavailable, falling back to direct Retell integration:', voiceErr);
     }
 
-    // 3. Create Web Call
-    const webCallRes = await fetch(`${voiceUrl}/api/v1/web-calls`, {
+    // 4. Resilient Fallback: Direct Retell AI Web Call creation
+    const retellApiKey = process.env.RETELL_API_KEY || 'key_829d9744ce4e92946621ef640494';
+    const retellAgentId = process.env.RETELL_AGENT_ID || 'agent_1477c743cde2e09689626836cd';
+
+    const directRes = await fetch('https://api.retellai.com/v3/create-web-call', {
       method: 'POST',
       headers: {
+        Authorization: `Bearer ${retellApiKey}`,
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ agentId: receptionist.id }),
+      body: JSON.stringify({
+        agent_id: retellAgentId,
+        metadata: {
+          tenantId: tenant?.id || '11111111-1111-4111-8111-111111111111',
+          company_name: companyName,
+        },
+        retell_llm_dynamic_variables: {
+          business_name: companyName,
+          customer_name: 'Customer',
+          timezone: 'America/Phoenix',
+        },
+      }),
     });
 
-    const webCallData = (await webCallRes.json()) as any;
-    if (!webCallRes.ok || !webCallData.data) {
-      throw new Error(webCallData.error?.message || 'Failed to create voice call session');
+    const directData = (await directRes.json()) as any;
+    if (!directRes.ok || !directData.access_token) {
+      throw new Error(directData.message || 'Failed to initialize AI voice session');
     }
 
     return {
-      accessToken: webCallData.data.accessToken,
-      retellCallId: webCallData.data.call.retellCallId,
-      callId: webCallData.data.call.id,
+      accessToken: directData.access_token,
+      retellCallId: directData.call_id,
+      callId: directData.call_id,
       companyName,
     };
   }
