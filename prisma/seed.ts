@@ -26,6 +26,7 @@ async function main() {
   const superAdminEmail = process.env.SUPERADMIN_EMAIL || 'superadmin@elijah.ai';
   const superAdminPassword = process.env.SUPERADMIN_PASSWORD || 'SuperSecretPassword123!';
   const superAdminHash = await bcrypt.hash(superAdminPassword, 10);
+  const commonHash = await bcrypt.hash('password123', 10);
 
   const superAdmin = await prisma.superAdmin.upsert({
     where: { email: superAdminEmail },
@@ -40,6 +41,13 @@ async function main() {
     },
   });
   console.log(`✅ Seeded SuperAdmin: ${superAdmin.email}`);
+
+  // Also seed backup superadmin
+  await prisma.superAdmin.upsert({
+    where: { email: 'admin@pashupat.cloud' },
+    update: { passwordHash: commonHash, name: 'Admin Pashupat' },
+    create: { email: 'admin@pashupat.cloud', passwordHash: commonHash, name: 'Admin Pashupat' },
+  });
 
   // 3. Seed the 6 Standard Roles (Managed by SuperAdmin)
   const allPermIds = SYSTEM_PERMISSIONS.map((p) => p.id);
@@ -150,39 +158,36 @@ async function main() {
 
   console.log('✅ Seeded 6 standard roles (editable/deletable by SuperAdmin).');
 
-  // 4. Seed Demo Tenant: Desert Air HVAC & Plumbing
-  const demoSlug = 'desert-air';
+  // 4. Seed Primary Company: Vanguard Electric & Power
+  const vanguardSlug = 'vanguard-electric';
   const tenant = await prisma.tenant.upsert({
-    where: { slug: demoSlug },
+    where: { slug: vanguardSlug },
     update: {
-      name: 'Desert Air HVAC & Plumbing',
-      tradeType: 'HVAC',
+      name: 'Vanguard Electric & Power',
+      tradeType: 'ELECTRICAL',
       status: 'ACTIVE',
       plan: 'OPERATIONS',
-      phone: '(480) 555-0199',
-      address: '2410 E University Dr, Phoenix, AZ 85034',
+      phone: '(602) 555-0199',
+      address: '100 N Central Ave, Phoenix, AZ 85004',
     },
     create: {
-      name: 'Desert Air HVAC & Plumbing',
-      slug: demoSlug,
-      tradeType: 'HVAC',
+      name: 'Vanguard Electric & Power',
+      slug: vanguardSlug,
+      tradeType: 'ELECTRICAL',
       status: 'ACTIVE',
       plan: 'OPERATIONS',
-      phone: '(480) 555-0199',
-      address: '2410 E University Dr, Phoenix, AZ 85034',
+      phone: '(602) 555-0199',
+      address: '100 N Central Ave, Phoenix, AZ 85004',
     },
   });
-  console.log(`✅ Seeded Demo Tenant: ${tenant.name} (${tenant.slug})`);
+  console.log(`✅ Seeded Primary Company: ${tenant.name} (${tenant.slug})`);
 
-  // 5. Seed Demo Users mapped to the 6 roles
+  // 5. Seed Core Company Users (as matching the login UI)
   const hash = await bcrypt.hash('password123', 10);
   const usersToSeed = [
-    { email: 'owner@pashupat.cloud', name: 'Michael Carter', roleId: ownerRole.id },
-    { email: 'office@pashupat.cloud', name: 'Amanda Brooks', roleId: officeRole.id },
-    { email: 'dispatcher@pashupat.cloud', name: 'Robert Martinez', roleId: dispatcherRole.id },
-    { email: 'sales@pashupat.cloud', name: 'Daniel Reed', roleId: salesRole.id },
-    { email: 'technician@pashupat.cloud', name: 'Mike Rodriguez', roleId: techRole.id },
-    { email: 'finance@pashupat.cloud', name: 'Rachel Green', roleId: financeRole.id },
+    { email: 'amohapatra@pods365.com', name: 'Aswajit Mohapatra', roleId: ownerRole.id },
+    { email: 'tekchand@pods365.com', name: 'Tekchand Dispatcher', roleId: dispatcherRole.id },
+    { email: 'aswajit.cool123@pods365.com', name: 'Aswajit Tech', roleId: techRole.id },
   ];
 
   for (const u of usersToSeed) {
@@ -194,6 +199,8 @@ async function main() {
         name: u.name,
         roleId: u.roleId,
         passwordHash: hash,
+        isActive: true,
+        isInviteAccepted: true,
       },
       create: {
         tenantId: tenant.id,
@@ -201,11 +208,13 @@ async function main() {
         name: u.name,
         roleId: u.roleId,
         passwordHash: hash,
+        isActive: true,
+        isInviteAccepted: true,
       },
     });
   }
 
-  console.log('✅ Seeded 6 demo users for Desert Air (password: password123)');
+  console.log('✅ Seeded core users for Vanguard Electric (password: password123)');
   console.log('✨ Seed complete!');
 }
 
