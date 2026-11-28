@@ -99,6 +99,7 @@ export class JobService {
       endOfDay.setUTCHours(23, 59, 59, 999);
 
       where.OR = [
+        // 1. Jobs scheduled on this date
         {
           scheduledStart: {
             gte: startOfDay,
@@ -111,8 +112,18 @@ export class JobService {
             lte: endOfDay,
           },
         },
+        // 2. All unassigned work orders (no technician assigned) that are not completed/cancelled
         {
-          status: 'UNSCHEDULED',
+          technicianId: null,
+          status: { notIn: [JobStatus.COMPLETED, JobStatus.CANCELLED] },
+        },
+        // 3. Unscheduled work orders awaiting technician allocation
+        {
+          status: JobStatus.UNSCHEDULED,
+        },
+        // 4. Incomplete active jobs (dispatched, en route, on site) so active work doesn't disappear across days
+        {
+          status: { in: [JobStatus.DISPATCHED, JobStatus.EN_ROUTE, JobStatus.ON_SITE] },
         },
       ];
     }
