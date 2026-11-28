@@ -8,6 +8,8 @@ import { userRoutes } from './modules/users/user.routes.js';
 import { customerRoutes } from './modules/customers/customer.routes.js';
 import { jobRoutes } from './modules/jobs/job.routes.js';
 import { notificationRoutes } from './modules/notifications/notification.routes.js';
+import { estimateRoutes } from './modules/estimates/estimate.routes.js';
+import { projectRoutes } from './modules/projects/project.routes.js';
 import { internalRoutes } from './modules/internal/internal.routes.js';
 import { operationsRoutes } from './modules/operations/operations.routes.js';
 import { errorResponse } from './utils/response.js';
@@ -47,6 +49,8 @@ app.use('/api/v1/roles', roleRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/jobs', jobRoutes);
+app.use('/api/v1/estimates', estimateRoutes);
+app.use('/api/v1/projects', projectRoutes);
 app.use('/api/v1/notifications', notificationRoutes);
 app.use('/api/v1', operationsRoutes);
 

@@ -40,6 +40,8 @@ model Tenant {
   customers    Customer[]
   equipments   Equipment[]
   jobs         Job[]
+  estimates    Estimate[]
+  projects     Project[]
   notifications Notification[]
   superAdminNotifications SuperAdminNotification[]
   serviceAreas ServiceArea[]
@@ -163,6 +165,8 @@ model Customer {
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   equipments   Equipment[]
   jobs         Job[]
+  estimates    Estimate[]
+  projects     Project[]
 
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
@@ -411,4 +415,76 @@ model TechnicianCheckIn {
   @@index([tenantId, serviceRequestId])
   @@map("technician_check_ins")
 }
+
+model Estimate {
+  id               String    @id @default(cuid())
+  tenantId         String
+  estimateNumber   String    // e.g. "EST-2001"
+  customerId       String?
+  customerName     String
+  customerPhone    String?
+  serviceAddress   String?
+  tradeCategory    String    @default("HVAC")
+  title            String
+  amount           Decimal   @db.Decimal(10, 2)
+  status           String    @default("DRAFT") // "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "DECLINED" | "EXPIRED"
+  grossMarginPct   Decimal?  @db.Decimal(5, 2)
+  repName          String?
+  notes            String?
+  hasTiers         Boolean   @default(false)
+  tiers            Json?
+  scopeItems       Json?
+  sentAt           DateTime?
+  viewedAt         DateTime?
+  acceptedAt       DateTime?
+  expiresAt        DateTime?
+
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer         Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  projects         Project[]
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([status])
+  @@map("estimates")
+}
+
+model Project {
+  id              String    @id @default(cuid())
+  tenantId        String
+  projectNumber   String    // e.g. "PRJ-301"
+  estimateId      String?
+  customerId      String?
+  customerName    String
+  customerPhone   String?
+  serviceAddress  String?
+  tradeCategory   String    @default("HVAC")
+  title           String
+  value           Decimal   @default(0) @db.Decimal(10, 2)
+  stage           String    @default("Deposit") // "Deposit" | "Permit" | "Equipment" | "Install" | "Inspection" | "Complete"
+  progressPct     Int       @default(20)
+  assignedCrew    String?
+  permitNumber    String?
+  equipmentModel  String?
+  lastAction      String?
+  notes           String?
+  milestones      Json?
+  timeline        Json?
+
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  estimate        Estimate? @relation(fields: [estimateId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([stage])
+  @@map("projects")
+}
+
 
