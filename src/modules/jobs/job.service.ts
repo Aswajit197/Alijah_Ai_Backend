@@ -1469,14 +1469,19 @@ export class JobService {
     );
 
     const voiceUrl = process.env.VOICE_SERVICE_URL || 'http://localhost:4002';
-    const res = await fetch(`${voiceUrl}/api/v1/calls`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      throw new Error('Failed to retrieve calls from voice-service');
+    let calls: any[] = [];
+    try {
+      const res = await fetch(`${voiceUrl}/api/v1/calls`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        calls = data.data || [];
+      }
+    } catch {
+      // Voice service not active locally; proceed with empty or Retell calls
+      calls = [];
     }
-    const data = (await res.json()) as any;
-    const calls = data.data || [];
 
     // Auto-sync any registered or pending calls directly with Retell
     const retellApiKey = process.env.RETELL_API_KEY;
